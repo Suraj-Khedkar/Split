@@ -39,3 +39,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# local database and secrets
+data/
+after_signup.png
+dark_mode.png
+android/
+ios/

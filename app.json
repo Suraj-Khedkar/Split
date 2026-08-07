@@ -1,25 +1,70 @@
 {
   "expo": {
-    "name": "splitwise-clone",
+    "name": "Splitwise Clone",
     "slug": "splitwise-clone",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.suraj.splitwiseclone",
+      "userInterfaceStyle": "automatic",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
+        "backgroundColor": "#1CC29F",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.suraj.splitwiseclone",
+      "userInterfaceStyle": "automatic",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "output": "single",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-system-ui",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Splitwise Clone uses your photos so you can pick a receipt to scan.",
+          "cameraPermission": "Splitwise Clone uses the camera so you can photograph a receipt."
+        }
+      ],
+      "expo-font",
+      "expo-web-browser"
+    ],
+    "scheme": "splitwiseclone",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF",
+      "dark": {
+        "image": "./assets/icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#121212"
+      }
+    },
+    "extra": {
+      "router": {},
+      "googleClientId": "563634096833-2v4hhc5tjf46ojvih9nehr7n0s04vqh5.apps.googleusercontent.com",
+      "googleAndroidClientId": "",
+      "eas": {
+        "projectId": "1a265b3c-e92b-4523-bdbf-f0a981b88a2f"
+      }
     }
   }
 }
