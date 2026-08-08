@@ -34,6 +34,41 @@ export interface Palette {
   header: string;
   settled: string;
   danger: string;
+
+  /**
+   * Chart marks only — deliberately not the same as owed/owe.
+   *
+   * The semantic colours above are tuned for text and tints. As chart fills
+   * they fail two of the checks in the dataviz method: below 3:1 against white
+   * in light mode, and above the dark-mode lightness band on #121212. These are
+   * the same two hues snapped to a passing lightness step, validated in both
+   * modes (lightness, chroma, CVD separation, normal-vision floor, contrast).
+   */
+  chartPos: string;
+  chartNeg: string;
+  /** Recessive track behind a bar, showing the full width for comparison. */
+  chartTrack: string;
+
+  /**
+   * Pressed-state background.
+   *
+   * Deliberately not `surface`: card and surface differ by 4 points of
+   * lightness in dark mode (#1A1A1A vs #1E1E1E), so using surface as the
+   * pressed state meant taps produced no perceptible feedback at all.
+   */
+  pressed: string;
+
+  /**
+   * Ordinal ramp for part-to-whole charts.
+   *
+   * One hue, monotonically lighter/darker by rank — not eight competing hues.
+   * Segments in a share bar are ordered by size, so the order carries meaning
+   * and the colour should show it; a nominal palette would spend the identity
+   * channel re-encoding what segment width already says, and would drag in the
+   * colour-blindness separation problem for no gain. Checked for monotonic
+   * lightness and for every step clearing 2:1 against its own surface.
+   */
+  chartRamp: string[];
 }
 
 export const lightColors: Palette = {
@@ -55,6 +90,12 @@ export const lightColors: Palette = {
   header: '#FFFFFF',
   settled: '#8A8A8A',
   danger: '#D93025',
+
+  chartPos: '#00A07E',
+  chartNeg: '#E34B06',
+  chartTrack: '#EFEFEF',
+  pressed: '#E4E4E4',
+  chartRamp: ['#006143', '#006E50', '#007C5C', '#008969', '#009776', '#13A583', '#2FB491', '#42C29E'],
 };
 
 export const darkColors: Palette = {
@@ -78,6 +119,12 @@ export const darkColors: Palette = {
   header: '#121212',
   settled: '#7A7A7A',
   danger: '#FF6B5E',
+
+  chartPos: '#00AE88',
+  chartNeg: '#E2693A',
+  chartTrack: '#262626',
+  pressed: '#333333',
+  chartRamp: ['#50D9B1', '#3DCAA3', '#27BC95', '#00AD87', '#009F7A', '#00916D', '#008360', '#007553'],
 };
 
 /**
@@ -144,3 +191,8 @@ export const categoryIcon: Record<string, string> = {
 export const CATEGORIES = Object.keys(categoryIcon).filter(
   (c) => c !== 'settlement'
 );
+
+/** Built-in icon, or a generic tag for a category the user invented. */
+export function iconForCategory(category: string): string {
+  return categoryIcon[category] ?? 'pricetag-outline';
+}

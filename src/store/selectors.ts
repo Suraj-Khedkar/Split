@@ -6,8 +6,32 @@ import {
   netForPerson,
   simplifyDebts,
 } from '../lib/balances';
+import { CATEGORIES } from '../theme';
 import type { Balance, Debt, Expense } from '../types';
+import { useSettings } from './useSettings';
 import { useStore } from './useStore';
+
+/**
+ * Every category that should appear in a picker.
+ *
+ * Three sources unioned: the built-in list, the ones this device invented, and
+ * any already attached to an expense. That last one is what carries a category
+ * between devices without a server change — it arrives with the expense.
+ */
+export function useCategories(): string[] {
+  const expenses = useStore((s) => s.expenses);
+  const custom = useSettings((s) => s.customCategories);
+  return useMemo(() => {
+    const all = new Set<string>(CATEGORIES);
+    for (const name of custom) all.add(name);
+    for (const e of expenses) {
+      if (e.category && !e.isSettlement) all.add(e.category);
+    }
+    // Settlements get a category of their own internally; it is never a choice.
+    all.delete('settlement');
+    return [...all];
+  }, [expenses, custom]);
+}
 
 /** Expenses belonging to one group, newest first. */
 export function useGroupExpenses(groupId: string): Expense[] {

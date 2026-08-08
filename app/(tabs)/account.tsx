@@ -125,6 +125,15 @@ export default function AccountScreen() {
       <Divider />
       <Row left={<Ionicons name="receipt-outline" size={22} color={c.textMuted} />} title="Expenses" right={<Text style={[font.body, { color: c.text }]}>{expenses.length}</Text>} />
 
+      <SectionTitle>Reports</SectionTitle>
+      <Row
+        left={<Ionicons name="bar-chart-outline" size={22} color={c.owed} />}
+        title="Your spending"
+        subtitle="Everything you have spent, across every group"
+        onPress={() => router.push('/report/me')}
+        chevron
+      />
+
       <SectionTitle>Move your data in</SectionTitle>
       <Row
         left={<Ionicons name="cloud-download-outline" size={22} color={c.owed} />}

@@ -12,11 +12,13 @@ import {
   View,
 } from 'react-native';
 
-import { Avatar, Button, Divider, SectionTitle } from '../../src/components/ui';
+import { Avatar, Button, Divider, PromptDialog, SectionTitle } from '../../src/components/ui';
 import { currencySymbol, formatAmount, parseAmount } from '../../src/lib/money';
 import { buildSplits, validatePayers, validateSplits } from '../../src/lib/split';
 import { useStore } from '../../src/store/useStore';
-import { CATEGORIES, Palette, categoryIcon, font, radius, spacing, useColors } from '../../src/theme';
+import { useCategories } from '../../src/store/selectors';
+import { useSettings } from '../../src/store/useSettings';
+import { Palette, font, iconForCategory, radius, spacing, useColors } from '../../src/theme';
 import type { SplitMethod } from '../../src/types';
 
 const METHODS: { key: SplitMethod; label: string; hint: string }[] = [
@@ -59,6 +61,9 @@ export default function NewExpenseScreen() {
       : ''
   );
   const [category, setCategory] = useState(prefillCategory ?? 'general');
+  const categories = useCategories();
+  const addCategory = useSettings((st) => st.addCategory);
+  const [namingCategory, setNamingCategory] = useState(false);
   const [paidById, setPaidById] = useState(meId);
   // Multi-payer is off by default: one person paying is overwhelmingly the
   // common case, and showing four amount fields for it would be noise.
@@ -167,16 +172,21 @@ export default function NewExpenseScreen() {
 
         <SectionTitle>Category</SectionTitle>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          {CATEGORIES.map((key) => {
+          {categories.map((key) => {
             const active = category === key;
             return (
               <Pressable
                 key={key}
                 onPress={() => setCategory(key)}
-                style={[styles.chip, active && styles.chipActive]}
+                android_ripple={{ color: c.pressed }}
+                style={({ pressed }) => [
+                  styles.chip,
+                  active && styles.chipActive,
+                  pressed && !active && { backgroundColor: c.pressed },
+                ]}
               >
                 <Ionicons
-                  name={categoryIcon[key] as never}
+                  name={iconForCategory(key) as never}
                   size={16}
                   color={active ? c.onDark : c.textMuted}
                 />
@@ -186,11 +196,40 @@ export default function NewExpenseScreen() {
               </Pressable>
             );
           })}
+          <Pressable
+            onPress={() => setNamingCategory(true)}
+            android_ripple={{ color: c.pressed }}
+            style={({ pressed }) => [
+              styles.chip,
+              { borderStyle: 'dashed' },
+              pressed && { backgroundColor: c.pressed },
+            ]}
+          >
+            <Ionicons name="add" size={16} color={c.owed} />
+            <Text style={[font.small, { marginLeft: 6, color: c.owed }]}>New</Text>
+          </Pressable>
         </ScrollView>
+
+        <PromptDialog
+          visible={namingCategory}
+          title="New category"
+          message="It will be available everywhere, and on your other devices once an expense uses it."
+          placeholder="e.g. gym, pets, medical"
+          onSubmit={(name) => {
+            const clean = addCategory(name);
+            if (clean) setCategory(clean);
+            setNamingCategory(false);
+          }}
+          onCancel={() => setNamingCategory(false)}
+        />
 
         <View style={styles.paidHeader}>
           <SectionTitle>Paid by</SectionTitle>
-          <Pressable onPress={() => setMultiPayer((v) => !v)} style={styles.linkBtn}>
+          <Pressable
+            onPress={() => setMultiPayer((v) => !v)}
+            android_ripple={{ color: c.pressed }}
+            style={({ pressed }) => [styles.linkBtn, pressed && { opacity: 0.6 }]}
+          >
             <Ionicons
               name={multiPayer ? 'people' : 'person'}
               size={15}
@@ -286,7 +325,11 @@ export default function NewExpenseScreen() {
           return (
             <View key={id}>
               <View style={styles.splitRow}>
-                <Pressable onPress={() => toggleParticipant(id)} style={styles.splitLeft}>
+                <Pressable
+                  onPress={() => toggleParticipant(id)}
+                  android_ripple={{ color: c.pressed }}
+                  style={({ pressed }) => [styles.splitLeft, pressed && { opacity: 0.6 }]}
+                >
                   <Ionicons
                     name={included ? 'checkmark-circle' : 'ellipse-outline'}
                     size={22}

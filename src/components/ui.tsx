@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
+  TextInput,
   StyleSheet,
   Text,
   View,
@@ -214,7 +215,11 @@ export function Row({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => ({ backgroundColor: pressed ? c.surface : c.card })}
+      android_ripple={{ color: c.pressed }}
+      style={({ pressed }) => ({
+        backgroundColor: pressed ? c.pressed : c.card,
+        opacity: pressed ? 0.9 : 1,
+      })}
     >
       {content}
     </Pressable>
@@ -271,9 +276,16 @@ export function Fab({
   return (
     <Pressable
       onPress={onPress}
+      android_ripple={{ color: c.pressed }}
+      // 0.9 opacity was the previous "feedback" and was imperceptible; a tap
+      // has to be obvious on a button this important.
       style={({ pressed }) => [
         styles.fab,
-        { backgroundColor: c.owe, opacity: pressed ? 0.9 : 1 },
+        {
+          backgroundColor: c.owe,
+          opacity: pressed ? 0.7 : 1,
+          transform: [{ scale: pressed ? 0.96 : 1 }],
+        },
       ]}
     >
       <Ionicons name="add" size={20} color={c.onDark} />
@@ -335,6 +347,86 @@ export function ConfirmDialog({
               title={confirmLabel}
               variant={destructive ? 'danger' : 'primary'}
               onPress={onConfirm}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+/**
+ * Single-field prompt.
+ *
+ * Alert.prompt is iOS-only and, like Alert.alert, does nothing at all on
+ * react-native-web — so asking the user for a word needs its own dialog.
+ */
+export function PromptDialog({
+  visible,
+  title,
+  message,
+  placeholder,
+  confirmLabel = 'Add',
+  onSubmit,
+  onCancel,
+}: {
+  visible: boolean;
+  title: string;
+  message?: string;
+  placeholder?: string;
+  confirmLabel?: string;
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const c = useColors();
+  const [value, setValue] = React.useState('');
+
+  // Clear between openings so a previous attempt is never pre-filled.
+  React.useEffect(() => {
+    if (visible) setValue('');
+  }, [visible]);
+
+  const submit = () => {
+    if (!value.trim()) return;
+    onSubmit(value);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <Pressable style={styles.backdrop} onPress={onCancel}>
+        <Pressable style={[styles.dialog, { backgroundColor: c.card }]} onPress={() => {}}>
+          <Text style={[font.h3, { color: c.text }]}>{title}</Text>
+          {message ? (
+            <Text style={[font.small, { color: c.textMuted, marginTop: spacing.sm, lineHeight: 20 }]}>
+              {message}
+            </Text>
+          ) : null}
+          <TextInput
+            value={value}
+            onChangeText={setValue}
+            placeholder={placeholder}
+            placeholderTextColor={c.textFaint}
+            autoCapitalize="none"
+            autoFocus
+            onSubmitEditing={submit}
+            returnKeyType="done"
+            style={{
+              ...font.body,
+              color: c.text,
+              backgroundColor: c.surface,
+              borderRadius: radius.md,
+              paddingHorizontal: spacing.md,
+              paddingVertical: 12,
+              marginTop: spacing.lg,
+            }}
+          />
+          <View style={styles.dialogActions}>
+            <Button title="Cancel" variant="secondary" onPress={onCancel} style={{ flex: 1 }} />
+            <Button
+              title={confirmLabel}
+              onPress={submit}
+              disabled={!value.trim()}
               style={{ flex: 1 }}
             />
           </View>

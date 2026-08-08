@@ -45,14 +45,22 @@ export default function FriendScreen() {
             </>
           )}
         </Text>
-        {net !== 0 ? (
+        <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg, alignSelf: 'stretch' }}>
+          {net !== 0 ? (
+            <Button
+              title="Settle up"
+              variant="secondary"
+              style={{ flex: 1 }}
+              onPress={() => router.push(`/settle/none?friendId=${person.id}`)}
+            />
+          ) : null}
           <Button
-            title="Settle up"
+            title="Report"
             variant="secondary"
-            style={{ marginTop: spacing.lg, alignSelf: 'stretch' }}
-            onPress={() => router.push(`/settle/none?friendId=${person.id}`)}
+            style={{ flex: 1 }}
+            onPress={() => router.push(`/report/friend?friendId=${person.id}`)}
           />
-        ) : null}
+        </View>
       </View>
 
       {shared.length === 0 ? (

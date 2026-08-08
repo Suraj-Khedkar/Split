@@ -103,6 +103,9 @@ export default function RootLayout() {
           <Stack.Screen name="friend/[id]" options={{ title: '' }} />
           <Stack.Screen name="friend/new" options={{ title: 'Add a friend', presentation: 'modal' }} />
           <Stack.Screen name="import" options={{ title: 'Import from Splitwise' }} />
+          <Stack.Screen name="report/me" options={{ title: 'Your spending' }} />
+          <Stack.Screen name="report/group" options={{ title: 'Report' }} />
+          <Stack.Screen name="report/friend" options={{ title: 'Report' }} />
           <Stack.Screen name="group/invite" options={{ title: 'Invite & join', presentation: 'modal' }} />
           <Stack.Screen name="group/manage" options={{ title: 'Group settings', presentation: 'modal' }} />
         </Stack>

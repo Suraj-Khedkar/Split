@@ -164,7 +164,10 @@ export default function AuthScreen() {
           secureTextEntry={!showPassword}
           style={[styles.input, { flex: 1, marginBottom: 0 }]}
         />
-        <Pressable onPress={() => setShowPassword((v) => !v)} style={styles.eye}>
+        <Pressable
+            onPress={() => setShowPassword((v) => !v)}
+            style={({ pressed }) => [styles.eye, pressed && { opacity: 0.5 }]}
+          >
           <Ionicons
             name={showPassword ? 'eye-off-outline' : 'eye-outline'}
             size={20}

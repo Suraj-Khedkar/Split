@@ -27,9 +27,31 @@ export default function GroupsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={styles.header}>
-        <Text style={[font.body, { color: c.textMuted }]}>Total balance</Text>
-        <Amount value={overall} size="h2" />
-        <BalanceLabel amount={overall} />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[font.body, { color: c.textMuted }]}>Total balance</Text>
+            <Amount value={overall} size="h2" />
+            <BalanceLabel amount={overall} />
+          </View>
+          <Pressable
+            onPress={() => router.push('/report/me')}
+            accessibilityLabel="Your spending report"
+            android_ripple={{ color: c.pressed, borderless: true }}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: c.border,
+              backgroundColor: pressed ? c.pressed : 'transparent',
+            })}
+          >
+            <Ionicons name="bar-chart-outline" size={15} color={c.owed} />
+            <Text style={[font.small, { color: c.owed, marginLeft: 6 }]}>Your spending</Text>
+          </Pressable>
+        </View>
       </View>
 
       <FlatList
