@@ -8,6 +8,8 @@ import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from '
 import { Button, Divider, SectionTitle } from '../../src/components/ui';
 import { api } from '../../src/lib/api';
 import { formatMoney } from '../../src/lib/money';
+import { setReceiptDraft } from '../../src/lib/receiptDraft';
+import { useStore } from '../../src/store/useStore';
 import { Palette, font, radius, spacing, useColors } from '../../src/theme';
 
 /** OCR.space rejects anything over 1MB, so shrink before uploading. */
@@ -24,6 +26,7 @@ export default function ScanScreen() {
   const styles = useMemo(() => makeStyles(c), [c]);
   const router = useRouter();
   const { groupId } = useLocalSearchParams<{ groupId?: string }>();
+  const groups = useStore((s) => s.groups);
 
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,11 +93,29 @@ export default function ScanScreen() {
     if (!picked.canceled && picked.assets[0]) void handle(picked.assets[0].uri);
   };
 
+  const group = groups.find((g) => g.id === groupId);
   const selected = items.filter((i) => i.include);
+  const canAssign = selected.length > 0 && (group?.memberIds.length ?? 0) > 1;
   const selectedSum = selected.reduce((sum, i) => sum + i.amount, 0);
   // Prefer the receipt's own total: it includes tax and service the line items
   // do not. Fall back to the selection when no total was found.
   const amountToUse = selected.length && selectedSum !== total ? selectedSum : total ?? selectedSum;
+
+  /**
+   * Hand the whole receipt on, rather than only its total.
+   *
+   * Only offered when there are lines to assign and more than one person to
+   * assign them to — on a solo group there is nothing to decide.
+   */
+  const assign = () => {
+    setReceiptDraft({
+      groupId: groupId ?? '',
+      items: selected.map(({ label, amount }) => ({ label, amount })),
+      total: amountToUse ?? 0,
+      merchant,
+    });
+    router.push(`/expense/assign?groupId=${groupId ?? ''}`);
+  };
 
   const useIt = () => {
     const description = merchant ?? 'Receipt';
@@ -196,9 +217,17 @@ export default function ScanScreen() {
           </Pressable>
           {showRaw ? <Text style={styles.raw}>{rawText || '(nothing)'}</Text> : null}
 
-          <View style={{ padding: spacing.lg }}>
+          <View style={{ padding: spacing.lg, gap: spacing.sm }}>
+            {canAssign ? (
+              <Button
+                title="Split by dish"
+                onPress={assign}
+                disabled={!amountToUse}
+              />
+            ) : null}
             <Button
               title={`Use ${formatMoney(amountToUse ?? 0)}`}
+              variant={canAssign ? 'secondary' : 'primary'}
               onPress={useIt}
               disabled={!amountToUse}
             />

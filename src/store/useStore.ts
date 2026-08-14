@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { newId } from '../lib/id';
 import { buildSplits, singlePayer } from '../lib/split';
 import type {
+  ActivityEntry,
   Expense,
   Group,
   GroupType,
@@ -21,6 +22,10 @@ interface Data {
   people: Person[];
   groups: Group[];
   expenses: Expense[];
+  /** Server-owned and append-only; kept here so the trail reads offline too. */
+  activity: ActivityEntry[];
+  /** Mutual connections, which may include people you share no group with. */
+  friendIds: string[];
 }
 
 export interface ServerSnapshot {
@@ -50,6 +55,9 @@ export interface ServerSnapshot {
     paidBy: { personId: string; amount: number }[];
     splits: { personId: string; amount: number }[];
   }[];
+  /** Optional so a snapshot from an older server still applies cleanly. */
+  activity?: ActivityEntry[];
+  friendIds?: string[];
 }
 
 interface Store extends Data {
@@ -65,7 +73,11 @@ interface Store extends Data {
   deleteGroup: (id: string) => void;
 
   addExpense: (input: NewExpense) => Expense;
-  updateExpense: (id: string, patch: Partial<Expense>) => void;
+  /** Resolves once the server has accepted (or refused) the edit. */
+  editExpense: (
+    id: string,
+    input: NewExpense
+  ) => Promise<{ ok: boolean; error?: string; changed: number }>;
   deleteExpense: (id: string) => void;
   settleUp: (fromId: string, toId: string, amount: number, groupId: string | null, currency?: string) => Expense;
 }
@@ -89,7 +101,7 @@ export interface NewExpense {
 }
 
 function empty(): Data {
-  return { meId: '', people: [], groups: [], expenses: [] };
+  return { meId: '', people: [], groups: [], expenses: [], activity: [], friendIds: [] };
 }
 
 /** Last push failure, surfaced in the UI instead of being swallowed. */
@@ -104,6 +116,28 @@ export const getLastPushError = () => lastPushError;
  * completed. Ids stay here until the server reports them back.
  */
 const pending = new Set<string>();
+
+/**
+ * Pull the server's view straight after a mutation this device made.
+ *
+ * The live-update socket deliberately skips the device that made a change —
+ * it already applied it optimistically, so echoing it back would be waste.
+ * But some rows are authored by the *server*: the activity trail is written
+ * there, and this device has no way to invent it. Without this, an expense you
+ * deleted yourself only showed up in Activity after a restart, because the
+ * fallback poll only runs while the socket is down.
+ *
+ * Failure is silent on purpose: the change itself already succeeded, and the
+ * next socket nudge or poll will catch up.
+ */
+async function resync() {
+  try {
+    const snapshot = await api.sync();
+    useStore.getState().applyServerSnapshot(snapshot);
+  } catch {
+    // Offline. The local view is still correct for everything this device did.
+  }
+}
 
 async function pushExpense(expense: Expense) {
   if (!expense.groupId) {
@@ -121,6 +155,7 @@ async function pushExpense(expense: Expense) {
     return;
   }
   pending.delete(expense.id);
+  await resync();
 }
 
 async function persist(data: Data) {
@@ -134,8 +169,8 @@ async function persist(data: Data) {
 
 export const useStore = create<Store>((set, get) => {
   const snapshot = (): Data => {
-    const { meId, people, groups, expenses } = get();
-    return { meId, people, groups, expenses };
+    const { meId, people, groups, expenses, activity, friendIds } = get();
+    return { meId, people, groups, expenses, activity, friendIds };
   };
   const commit = (patch: Partial<Data>) => {
     set(patch as never);
@@ -152,7 +187,15 @@ export const useStore = create<Store>((set, get) => {
         if (raw) {
           const saved = JSON.parse(raw) as Data;
           if (saved?.people?.length) {
-            set({ ...saved, hydrated: true });
+            // Anything written before the trail existed has no activity list
+            // at all. Without this default the first launch after upgrading
+            // would crash every screen that reads it.
+            set({
+              ...saved,
+              activity: saved.activity ?? [],
+              friendIds: saved.friendIds ?? [],
+              hydrated: true,
+            });
             return;
           }
         }
@@ -233,17 +276,94 @@ export const useStore = create<Store>((set, get) => {
       return expense;
     },
 
-    updateExpense: (id, patch) =>
-      commit({
-        expenses: get().expenses.map((e) => (e.id === id ? { ...e, ...patch } : e)),
-      }),
+    /**
+     * Edit an existing expense through the server, which records what changed.
+     *
+     * Deliberately not optimistic, unlike addExpense: the server reconciles the
+     * split and is the only side that can reject an unbalanced edit, so showing
+     * the new numbers before it agrees would mean rendering a state that may
+     * never exist. An edit is also rare enough that the wait is not felt.
+     */
+    editExpense: async (id, input) => {
+      const current = get().expenses.find((e) => e.id === id);
+      if (!current) return { ok: false, error: 'That expense is no longer here.', changed: 0 };
+      if (!input.groupId) {
+        return {
+          ok: false,
+          error: 'That expense is not attached to a group, so it cannot be edited.',
+          changed: 0,
+        };
+      }
+
+      const paidBy =
+        input.paidBy && input.paidBy.length > 0
+          ? input.paidBy.filter((p) => p.amount !== 0)
+          : singlePayer(input.paidById ?? get().meId, input.amount);
+      const splits = buildSplits(
+        input.splitMethod,
+        input.amount,
+        input.participantIds,
+        input.splitInputs ?? {}
+      );
+
+      try {
+        const { expense, changes } = await api.updateExpense({
+          id,
+          groupId: input.groupId,
+          description: input.description.trim() || 'Expense',
+          amount: input.amount,
+          currency: input.currency ?? current.currency,
+          category: input.category ?? current.category,
+          splitMethod: input.splitMethod,
+          date: input.date ?? current.date,
+          notes: input.notes,
+          paidBy,
+          splits,
+        });
+        // Take the server's version rather than the local guess — it is the
+        // side that rounded the split, so this cannot drift by a paisa.
+        commit({
+          expenses: get().expenses.map((e) =>
+            e.id === id
+              ? {
+                  ...e,
+                  description: expense.description,
+                  amount: expense.amount,
+                  currency: expense.currency,
+                  category: expense.category,
+                  paidBy: expense.paidBy,
+                  splits: expense.splits,
+                  splitMethod: (expense.splitMethod as SplitMethod) ?? e.splitMethod,
+                  date: expense.date,
+                  notes: expense.notes,
+                }
+              : e
+          ),
+        });
+        lastPushError = '';
+        await resync();
+        return { ok: true, changed: changes.length };
+      } catch (err) {
+        const error = err instanceof Error ? err.message : 'Could not save the edit';
+        lastPushError = error;
+        return { ok: false, error, changed: 0 };
+      }
+    },
 
     deleteExpense: (id) => {
       pending.delete(id);
       commit({ expenses: get().expenses.filter((e) => e.id !== id) });
-      void api.deleteExpense(id).catch((err) => {
-        lastPushError = err instanceof Error ? err.message : 'Could not delete on the server';
-      });
+      void (async () => {
+        try {
+          await api.deleteExpense(id);
+        } catch (err) {
+          lastPushError = err instanceof Error ? err.message : 'Could not delete on the server';
+          return;
+        }
+        // The server wrote a "deleted" entry to the trail that only it knows
+        // about, and the socket will not tell this device about its own change.
+        await resync();
+      })();
     },
 
     settleUp: (fromId, toId, amount, groupId, currency = 'INR') => {
@@ -330,6 +450,13 @@ export const useStore = create<Store>((set, get) => {
         expenses: [...inFlight, ...expenses].sort((a, b) =>
           b.createdAt.localeCompare(a.createdAt)
         ),
+        // The server owns this outright, so it replaces rather than merges.
+        // Keeping the previous list when the field is absent stops a snapshot
+        // from an older server build from wiping history off the device.
+        activity: (snapshot.activity ?? get().activity ?? [])
+          .slice()
+          .sort((a, b) => b.at.localeCompare(a.at)),
+        friendIds: snapshot.friendIds ?? get().friendIds ?? [],
       });
     },
 

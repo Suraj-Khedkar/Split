@@ -20,15 +20,15 @@ if (html.includes('manifest.webmanifest')) {
 
 const HEAD = `
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFFFFF" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121212" />
-    <meta name="description" content="Share expenses with friends and settle up." />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F7F9" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0E0F12" />
+    <meta name="description" content="Share expenses with friends, track your own, and settle up." />
 
     <!-- iOS ignores the manifest when installing; these drive it instead. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Split" />
+    <meta name="apple-mobile-web-app-title" content="SplitTrack" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" href="/icon-192.png" />
 
@@ -36,9 +36,9 @@ const HEAD = `
       /* Paint the app background before React mounts: a flash of the wrong
          colour on launch is the clearest "this is a website" tell in a
          standalone app. Follows the system theme, as the app itself does. */
-      html, body, #root { background-color: #FFFFFF; }
+      html, body, #root { background-color: #F6F7F9; }
       @media (prefers-color-scheme: dark) {
-        html, body, #root { background-color: #121212; }
+        html, body, #root { background-color: #0E0F12; }
       }
       body { overscroll-behavior-y: none; }
 
@@ -55,16 +55,19 @@ const HEAD = `
          its own labels, which clipped them mid-glyph. The app owns the insets;
          #root only has to fill the screen.
 
-         svh, not the reset's height:100% and not dvh. iOS Safari resolves
-         percentage heights against the LARGE viewport - the one you get with
-         the toolbar retracted - so the bottom of the app, tab bar included,
-         renders underneath the toolbar until you scroll. svh is the small
-         viewport, with the chrome showing: laying out to it keeps the tab bar
-         above the toolbar at all times. dvh is wrong here because it follows
-         the chrome as it animates, which moves the clipping rather than
-         removing it. In a standalone PWA there is no chrome and all three
-         units are equal, so this costs nothing there. */
-      #root { height: 100svh; min-height: 100svh; }
+         And NO height override either. Expo's own reset (the #expo-reset style
+         block above) already sets html, body and #root to height:100%, and with
+         viewport-fit=cover that is exactly the screen in a standalone PWA,
+         safe areas included.
+
+         Every viewport unit tried here made it worse. 100svh is the *small*
+         viewport - what you get with Safari's toolbars showing - and iOS keeps
+         computing it that way even once installed to the Home Screen, so #root
+         ended up a chunk short of the screen and left an unpainted band along
+         the bottom of every route, tab bar or not. 100dvh tracks the visual
+         viewport, so the keyboard drags it around. Percentages are the only
+         ones that resolve against the layout viewport, which is the thing that
+         actually matches the screen. */
 
       /* The status bar is translucent and iOS always draws its text white, so
          the strip behind it has to stay dark even in light mode - a white
@@ -78,10 +81,17 @@ const HEAD = `
         left: 0;
         right: 0;
         height: env(safe-area-inset-top);
-        background-color: #121212;
+        background-color: #0E0F12;
         z-index: 2147483647;
         pointer-events: none;
       }
+
+      /* No bottom counterpart to the strip above, deliberately. One was tried
+         while #root was mis-sized, and it is wrong once the root fills the
+         screen: the tab bar already covers the home indicator on the tab
+         routes, and on a stack route - a group, an expense - there is no tab
+         bar, so a painted strip put a card-coloured band where the page
+         background belongs. */
     </style>
     <script>
       if ('serviceWorker' in navigator) {

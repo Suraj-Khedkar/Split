@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { describeEntry } from '../lib/entries';
 import { emptyFilter, filterExpenses, isFilterActive, type ExpenseFilter } from '../lib/filters';
 import { formatMoney } from '../lib/money';
 import { bucketSpend, buildReport, shareForPerson } from '../lib/reports';
@@ -536,31 +537,41 @@ export function ExpenseReport({
           ) : null}
 
           <SectionTitle>
-            {filtered ? `Matching expenses (${scoped.length})` : `Expenses (${scoped.length})`}
+            {/* report.count is spend only, so the heading agrees with every
+                figure above it even when paybacks are shown in the list. */}
+            {filtered ? `Matching expenses (${report.count})` : `Expenses (${report.count})`}
+            {scoped.length - report.count > 0
+              ? ` · ${scoped.length - report.count} payback${
+                  scoped.length - report.count === 1 ? '' : 's'
+                }`
+              : ''}
           </SectionTitle>
           {scoped.slice(0, 40).map((e) => {
-            const myShare = e.splits.find((s) => s.personId === meId)?.amount ?? 0;
-            const myPaid = e.paidBy.find((p) => p.personId === meId)?.amount ?? 0;
-            const delta = myPaid - myShare;
+            const entry = describeEntry(e, people, meId);
             return (
               <Row
                 key={e.id}
                 left={
                   <Ionicons
-                    name={iconForCategory(e.category) as never}
+                    name={
+                      (entry.isPayback
+                        ? 'swap-horizontal-outline'
+                        : iconForCategory(e.category)) as never
+                    }
                     size={20}
-                    color={c.textMuted}
+                    color={entry.isPayback ? c.settled : c.textMuted}
                   />
                 }
-                title={e.description}
+                title={entry.title}
                 subtitle={
                   <Text style={[font.small, { color: c.textMuted, marginTop: 2 }]}>
                     {e.date} · {formatMoney(e.amount, e.currency)}
-                    {delta !== 0 ? (
-                      <Text style={{ color: balanceColor(delta, c), fontWeight: '600' }}>
+                    {entry.isPayback ? ' · payback, not spending' : null}
+                    {entry.delta !== 0 && !entry.isPayback ? (
+                      <Text style={{ color: balanceColor(entry.delta, c), fontWeight: '600' }}>
                         {'  '}
-                        {delta > 0 ? 'you lent ' : 'you borrowed '}
-                        {formatMoney(Math.abs(delta), e.currency)}
+                        {entry.deltaLabel}{' '}
+                        {formatMoney(Math.abs(entry.delta), e.currency)}
                       </Text>
                     ) : null}
                   </Text>

@@ -1,19 +1,40 @@
+import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { FlatList, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 
-import { Avatar, Divider, EmptyState, Row } from '../../src/components/ui';
-import { formatMoney } from '../../src/lib/money';
+import { Avatar, Divider, EmptyState } from '../../src/components/ui';
 import { personName, useStore } from '../../src/store/useStore';
-import { balanceColor, font, useColors } from '../../src/theme';
+import { Palette, font, spacing, useColors } from '../../src/theme';
+import type { ActivityAction } from '../../src/types';
+
+/**
+ * The permanent record of everything that has happened to shared money.
+ *
+ * Read straight from the server's append-only log rather than derived from the
+ * current expense list, which is what lets a deleted expense still appear here:
+ * the expense is gone, its trail is not. Nothing on this screen can remove an
+ * entry, and the API has no endpoint that would.
+ */
+const LOOK: Record<ActivityAction, { icon: string; verb: string; tone: 'normal' | 'warn' | 'good' }> = {
+  created: { icon: 'add-circle-outline', verb: 'added', tone: 'normal' },
+  edited: { icon: 'create-outline', verb: 'edited', tone: 'warn' },
+  deleted: { icon: 'trash-outline', verb: 'deleted', tone: 'warn' },
+  settled: { icon: 'swap-horizontal-outline', verb: 'settled up', tone: 'good' },
+  joined: { icon: 'person-add-outline', verb: 'joined', tone: 'good' },
+};
 
 export default function ActivityScreen() {
   const c = useColors();
-  const expenses = useStore((s) => s.expenses);
+  const styles = makeStyles(c);
+  const activity = useStore((s) => s.activity);
   const people = useStore((s) => s.people);
   const groups = useStore((s) => s.groups);
   const meId = useStore((s) => s.meId);
 
-  const feed = [...expenses].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const feed = [...activity].sort((a, b) => b.at.localeCompare(a.at));
+
+  const toneColor = (tone: 'normal' | 'warn' | 'good') =>
+    tone === 'warn' ? c.owe : tone === 'good' ? c.settled : c.owed;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -22,45 +43,68 @@ export default function ActivityScreen() {
         keyExtractor={(item) => item.id}
         ItemSeparatorComponent={Divider}
         ListEmptyComponent={
-          <EmptyState icon="pulse-outline" title="Nothing here yet" body="Expenses you add will show up in this feed." />
+          <EmptyState
+            icon="pulse-outline"
+            title="Nothing here yet"
+            body="Changes will be recorded here."
+          />
         }
         renderItem={({ item }) => {
-          const payer = item.paidBy[0];
-          const payerName = personName(people, payer?.personId ?? '', meId);
+          const look = LOOK[item.action] ?? LOOK.created;
+          const actor = people.find((p) => p.id === item.actorId);
           const group = groups.find((g) => g.id === item.groupId);
-          const person = people.find((p) => p.id === payer?.personId);
-
-          // What this entry did to *your* balance, which is the only number
-          // that matters at a glance.
-          const myShare = item.splits.find((s) => s.personId === meId)?.amount ?? 0;
-          const myPaid = item.paidBy.find((p) => p.personId === meId)?.amount ?? 0;
-          const delta = myPaid - myShare;
-
-          const headline = item.isSettlement
-            ? `${payerName} paid ${personName(people, item.splits[0]?.personId ?? '', meId)}`
-            : `${payerName} added "${item.description}"`;
+          const when = new Date(item.at);
 
           return (
-            <Row
-              left={<Avatar name={person?.name ?? '?'} colorIndex={person?.colorIndex ?? 0} size={36} />}
-              title={headline}
-              subtitle={
+            <View style={styles.row}>
+              <Avatar name={actor?.name ?? '?'} colorIndex={actor?.colorIndex ?? 0} size={36} />
+              <View style={{ flex: 1, marginLeft: spacing.md }}>
+                <View style={styles.headline}>
+                  <Ionicons
+                    name={look.icon as never}
+                    size={14}
+                    color={toneColor(look.tone)}
+                    style={{ marginRight: 5 }}
+                  />
+                  <Text style={[font.bodyStrong, { color: c.text, flex: 1 }]}>
+                    {personName(people, item.actorId, meId)} {look.verb}
+                    {item.action === 'joined' ? '' : item.summary ? ` "${item.summary}"` : ''}
+                  </Text>
+                </View>
+
                 <Text style={[font.small, { color: c.textMuted, marginTop: 2 }]}>
-                  {group ? group.name + ' · ' : ''}
-                  {formatMoney(item.amount, item.currency)}
-                  {delta !== 0 ? (
-                    <Text style={{ color: balanceColor(delta, c), fontWeight: '600' }}>
-                      {'  '}
-                      {delta > 0 ? 'you lent ' : 'you borrowed '}
-                      {formatMoney(Math.abs(delta), item.currency)}
-                    </Text>
-                  ) : null}
+                  {group ? `${group.name} · ` : ''}
+                  {when.toLocaleString()}
                 </Text>
-              }
-            />
+
+                {item.changes.map((change) => (
+                  <Text
+                    key={change.field}
+                    style={[font.small, { color: c.textFaint, marginTop: 4 }]}
+                  >
+                    {change.field}
+                    {': '}
+                    <Text style={{ textDecorationLine: 'line-through' }}>{change.from}</Text>
+                    {'  →  '}
+                    <Text style={{ color: c.textMuted }}>{change.to}</Text>
+                  </Text>
+                ))}
+              </View>
+            </View>
           );
         }}
       />
     </View>
   );
 }
+
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+    },
+    headline: { flexDirection: 'row', alignItems: 'center' },
+  });

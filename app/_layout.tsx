@@ -5,11 +5,13 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { loadDeviceId } from '../src/lib/device';
+import { readPendingInvite } from '../src/lib/invite';
+import { autoEnablePush } from '../src/lib/push';
 import { useAuth } from '../src/store/useAuth';
 import { useAutoSync } from '../src/store/useAutoSync';
 import { useSettings } from '../src/store/useSettings';
 import { useStore } from '../src/store/useStore';
-import { font, useColors, useIsDark } from '../src/theme';
+import { font, spacing, useColors, useIsDark } from '../src/theme';
 
 export function ErrorBoundary({
   error,
@@ -18,13 +20,26 @@ export function ErrorBoundary({
   error: Error;
   retry: () => Promise<void>;
 }) {
+  // This screen predates the theme and used raw defaults, which meant black
+  // text on the dark canvas whenever it actually appeared.
+  const c = useColors();
   return (
-    <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 12 }}>
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>Something broke</Text>
-      <Text style={{ opacity: 0.7 }}>{error?.message ?? 'Unknown error'}</Text>
+    <View
+      style={{
+        flex: 1,
+        justifyContent: 'center',
+        padding: spacing.xl,
+        gap: spacing.md,
+        backgroundColor: c.bg,
+      }}
+    >
+      <Text style={[font.h2, { color: c.text }]}>Something broke</Text>
+      <Text style={[font.body, { color: c.textMuted }]}>
+        {error?.message ?? 'Unknown error'}
+      </Text>
       <Text
         onPress={() => void retry()}
-        style={{ color: '#1CC29F', fontWeight: '700', marginTop: 8 }}
+        style={[font.bodyStrong, { color: c.owed, marginTop: spacing.sm }]}
       >
         Try again
       </Text>
@@ -59,16 +74,48 @@ export default function RootLayout() {
     void loadSettings();
   }, [hydrate, restore, loadSettings]);
 
+  // Notifications are meant to be on unless the user turns them off, so this
+  // runs as soon as there is a session to hang a subscription on. It cannot
+  // run earlier: registering the subscription is an authenticated call.
+  useEffect(() => {
+    if (authStatus !== 'signedIn') return;
+    void autoEnablePush();
+  }, [authStatus]);
+
   // Route guard. Without this the app dropped straight into the tabs, so a
   // signed-out visitor saw an empty (previously seeded) ledger and had no way
   // to reach sign-in.
   useEffect(() => {
     if (!hydrated || authStatus === 'loading') return;
-    // oauthredirect is part of signing in: the guard must not bounce it to
-    // /auth before it has handed the authorization code back to the opener.
-    const inAuth = segments[0] === 'auth' || segments[0] === 'oauthredirect';
-    if (authStatus === 'signedOut' && !inAuth) router.replace('/auth');
-    else if (authStatus === 'signedIn' && inAuth) router.replace('/');
+    const onAuthScreen = segments[0] === 'auth';
+    // oauthredirect is a transient handoff page that closes itself once it has
+    // passed the authorization code back to the opener. It is deliberately
+    // excluded from BOTH branches below: signed out it must not be bounced to
+    // /auth before the handoff, and signed in it must not be bounced to the
+    // tabs either — linking a Google account happens while already signed in,
+    // and navigating away mid-handoff would drop the code.
+    const onOauthRedirect = segments[0] === 'oauthredirect';
+    // /join carries an invite code from a shared link. A signed-out visitor
+    // must be allowed to render it, because that screen is what stores the
+    // code before sending them on to sign up — redirecting from here instead
+    // would throw the code away and the link would silently do nothing.
+    // /verify carries the token from a confirmation email and has to render
+    // for a signed-out visitor — that is the entire point of it.
+    const isPublic =
+      onAuthScreen || onOauthRedirect || segments[0] === 'join' || segments[0] === 'verify';
+
+    if (authStatus === 'signedOut' && !isPublic) {
+      router.replace('/auth');
+    } else if (authStatus === 'signedIn' && onAuthScreen) {
+      // Someone who arrived from an invite link should land in the group they
+      // were invited to, not on the groups tab. Doing it here rather than in
+      // the auth screen covers every route into an account at once: sign-in,
+      // sign-up and Google.
+      void (async () => {
+        const pending = await readPendingInvite();
+        router.replace(pending ? `/join/${pending}` : '/');
+      })();
+    }
   }, [authStatus, hydrated, segments, router]);
 
   if (!hydrated || !settingsLoaded || authStatus === 'loading') {
@@ -98,15 +145,23 @@ export default function RootLayout() {
           <Stack.Screen name="group/new" options={{ title: 'Create a group', presentation: 'modal' }} />
           <Stack.Screen name="expense/new" options={{ title: 'Add expense', presentation: 'modal' }} />
           <Stack.Screen name="expense/scan" options={{ title: 'Scan a receipt', presentation: 'modal' }} />
+          <Stack.Screen name="expense/assign" options={{ title: 'Who had what?' }} />
           <Stack.Screen name="expense/[id]" options={{ title: 'Details' }} />
           <Stack.Screen name="settle/[groupId]" options={{ title: 'Settle up', presentation: 'modal' }} />
           <Stack.Screen name="friend/[id]" options={{ title: '' }} />
           <Stack.Screen name="friend/new" options={{ title: 'Add a friend', presentation: 'modal' }} />
           <Stack.Screen name="import" options={{ title: 'Import from Splitwise' }} />
+          <Stack.Screen name="quick" options={{ title: 'Quick add' }} />
+          <Stack.Screen name="shortcut" options={{ title: 'Back Tap to add' }} />
           <Stack.Screen name="report/me" options={{ title: 'Your spending' }} />
+          <Stack.Screen name="report/personal" options={{ title: 'Personal spending' }} />
           <Stack.Screen name="report/group" options={{ title: 'Report' }} />
           <Stack.Screen name="report/friend" options={{ title: 'Report' }} />
           <Stack.Screen name="group/invite" options={{ title: 'Invite & join', presentation: 'modal' }} />
+          <Stack.Screen name="join/[code]" options={{ title: 'Invite' }} />
+          <Stack.Screen name="verify" options={{ title: 'Confirm email' }} />
+          <Stack.Screen name="profile" options={{ title: 'Edit profile', presentation: 'modal' }} />
+          <Stack.Screen name="group/members" options={{ title: 'Members' }} />
           <Stack.Screen name="group/manage" options={{ title: 'Group settings', presentation: 'modal' }} />
         </Stack>
     </SafeAreaProvider>

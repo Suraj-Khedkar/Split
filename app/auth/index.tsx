@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '../../src/components/ui';
+import { api } from '../../src/lib/api';
 import { useGoogleSignIn } from '../../src/lib/googleAuth';
 import { useAuth } from '../../src/store/useAuth';
 import { Palette, font, radius, spacing, useColors } from '../../src/theme';
@@ -40,6 +41,8 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const isSignup = mode === 'signup';
   const canSubmit =
@@ -48,11 +51,26 @@ export default function AuthScreen() {
     (!isSignup || name.trim().length > 0);
 
   const submit = async () => {
-    // On success the root guard performs the redirect; navigating here as
-    // well raced it and could land on a route that does not exist.
-    await (isSignup
-      ? signUp(email.trim(), name.trim(), password)
-      : signIn(email.trim(), password));
+    if (!isSignup) {
+      // On success the root guard performs the redirect; navigating here as
+      // well raced it and could land on a route that does not exist.
+      await signIn(email.trim(), password);
+      return;
+    }
+    // Signing up no longer signs you in — the address has to be confirmed
+    // first — so this screen has to say what happens next itself.
+    if (await signUp(email.trim(), name.trim(), password)) setSent(true);
+  };
+
+  const resend = async () => {
+    setResending(true);
+    try {
+      await api.resendVerification(email.trim());
+    } catch {
+      // The endpoint answers the same way regardless; nothing to report.
+    } finally {
+      setResending(false);
+    }
   };
 
   const swap = (next: 'signin' | 'signup') => {
@@ -80,9 +98,39 @@ export default function AuthScreen() {
     </KeyboardAvoidingView>
   );
 
+  if (sent) {
+    return shell(
+      <>
+        <Text style={[font.h1, { color: c.text, marginTop: spacing.lg }]}>Check your email</Text>
+        <Text
+          style={[font.body, { color: c.textMuted, marginTop: spacing.md, textAlign: 'center' }]}
+        >
+          We sent a confirmation link to {email.trim()}. Open it to finish setting up your
+          account.
+        </Text>
+        <Button
+          title={resending ? 'Sending…' : 'Send it again'}
+          variant="secondary"
+          onPress={() => void resend()}
+          disabled={resending}
+          style={{ marginTop: spacing.xl, alignSelf: 'stretch' }}
+        />
+        <Text
+          onPress={() => {
+            setSent(false);
+            setMode('signin');
+          }}
+          style={[font.small, { color: c.owed, marginTop: spacing.lg }]}
+        >
+          Back to sign in
+        </Text>
+      </>
+    );
+  }
+
   return shell(
     <>
-      <Text style={[font.h1, { color: c.text, marginTop: spacing.lg }]}>Splitwise Clone</Text>
+      <Text style={[font.h1, { color: c.text, marginTop: spacing.lg }]}>Split &amp; Track</Text>
       <Text style={[font.body, { color: c.textMuted, marginTop: spacing.xs, textAlign: 'center' }]}>
         {isSignup
           ? 'Create an account to share groups with friends.'

@@ -229,3 +229,75 @@ test('validatePayers catches sums that do not match the bill', () => {
 
   assert.equal(validatePayers(6000, []).valid, false, 'nobody paying is invalid');
 });
+
+test('adjust: equal split with a surcharge on one person', () => {
+  // 600 with 50 on b: the 50 comes off the top, the remaining 550 splits
+  // 183.34 / 183.33 / 183.33 — splitEvenly gives the leftover paisa to the
+  // first person — and b's 50 lands on top of their share.
+  const splits = buildSplits('adjust', 60000, ['a', 'b', 'c'], { b: 5000 });
+  assert.deepEqual(splits, [
+    { personId: 'a', amount: 18334 },
+    { personId: 'b', amount: 23333 },
+    { personId: 'c', amount: 18333 },
+  ]);
+  // What the feature promises: b carries exactly 50 more than an equal peer.
+  assert.equal(splits[1].amount - splits[2].amount, 5000);
+  assert.equal(splits.reduce((n, s) => n + s.amount, 0), 60000);
+});
+
+test('adjust: no surcharge behaves exactly like an equal split', () => {
+  assert.deepEqual(
+    buildSplits('adjust', 10000, ['a', 'b', 'c']),
+    buildSplits('equal', 10000, ['a', 'b', 'c'])
+  );
+});
+
+test('adjust: surcharges always sum back to the total', () => {
+  for (const total of [10000, 60000, 99999, 1]) {
+    for (const extra of [0, 1, 500, 5000]) {
+      const splits = buildSplits('adjust', total, ['a', 'b', 'c', 'd'], { a: extra, c: extra });
+      assert.equal(
+        splits.reduce((n, s) => n + s.amount, 0),
+        total,
+        `total ${total} extra ${extra}`
+      );
+    }
+  }
+});
+
+test('reduce: equal split with a discount for one person', () => {
+  // 600 with 50 off b: the 50 goes back on top, 650 splits 216.67/216.67/216.66,
+  // then b's 50 comes off their share. The other two absorb it.
+  const splits = buildSplits('reduce', 60000, ['a', 'b', 'c'], { b: 5000 });
+  assert.deepEqual(splits, [
+    { personId: 'a', amount: 21667 },
+    { personId: 'b', amount: 16667 },
+    { personId: 'c', amount: 21666 },
+  ]);
+  // What the feature promises: b pays 50 less than an equal peer.
+  assert.equal(splits[0].amount - splits[1].amount, 5000);
+  assert.equal(splits.reduce((n, s) => n + s.amount, 0), 60000);
+});
+
+test('reduce: no discount behaves exactly like an equal split', () => {
+  assert.deepEqual(
+    buildSplits('reduce', 10000, ['a', 'b', 'c']),
+    buildSplits('equal', 10000, ['a', 'b', 'c'])
+  );
+});
+
+test('reduce and adjust are mirror images', () => {
+  // Taking 50 off one person is the same shape as adding 50 to the other two.
+  const reduced = buildSplits('reduce', 60000, ['a', 'b', 'c'], { b: 5000 });
+  for (const total of [10000, 60000, 99999]) {
+    for (const cut of [0, 1, 2500]) {
+      const splits = buildSplits('reduce', total, ['a', 'b', 'c', 'd'], { b: cut, d: cut });
+      assert.equal(
+        splits.reduce((n, s) => n + s.amount, 0),
+        total,
+        `total ${total} cut ${cut}`
+      );
+    }
+  }
+  assert.equal(reduced.reduce((n, s) => n + s.amount, 0), 60000);
+});

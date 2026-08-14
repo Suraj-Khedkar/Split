@@ -12,6 +12,8 @@ import type { SplitMethod, SplitShare } from '../types';
  *   exact   - minor units each person owes
  *   percent - percentage points (should total 100, but is normalised anyway)
  *   shares  - relative weights, e.g. 2 shares vs 1 share
+ *   adjust  - minor units of EXTRA on top of an even split
+ *   reduce  - minor units taken OFF an even split
  */
 export function buildSplits(
   method: SplitMethod,
@@ -24,6 +26,34 @@ export function buildSplits(
   if (method === 'equal') {
     const amounts = splitEvenly(total, personIds.length);
     return personIds.map((personId, i) => ({ personId, amount: amounts[i] }));
+  }
+
+  if (method === 'reduce') {
+    // The mirror of `adjust`: put the discounts back on top before splitting,
+    // so the people who are not discounted absorb them, then take each
+    // person's own reduction off their share. Same ordering, same guarantee
+    // that the shares sum to exactly `total`.
+    const cuts = personIds.map((id) => Math.max(0, Math.round(inputs[id] ?? 0)));
+    const forgiven = cuts.reduce((a, b) => a + b, 0);
+    const base = splitEvenly(total + forgiven, personIds.length);
+    return personIds.map((personId, i) => ({
+      personId,
+      amount: base[i] - cuts[i],
+    }));
+  }
+
+  if (method === 'adjust') {
+    // Take the surcharges off the top, split what is left evenly, then hand
+    // each person their own extra back. Doing it in that order is what keeps
+    // the shares summing to exactly `total`: splitEvenly already absorbs the
+    // rounding remainder, and the extras are whole minor units added after.
+    const extras = personIds.map((id) => Math.max(0, Math.round(inputs[id] ?? 0)));
+    const surcharge = extras.reduce((a, b) => a + b, 0);
+    const base = splitEvenly(total - surcharge, personIds.length);
+    return personIds.map((personId, i) => ({
+      personId,
+      amount: base[i] + extras[i],
+    }));
   }
 
   if (method === 'exact') {

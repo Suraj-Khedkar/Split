@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
+import { learningKey } from '../lib/categorise';
+
 export type ThemeMode = 'dark' | 'light' | 'system';
 
 const KEY = 'splitwise-clone/settings';
@@ -19,11 +21,26 @@ interface Settings {
    * makes one you added on your phone show up on your laptop.
    */
   customCategories: string[];
+  /**
+   * Categories the user has corrected by hand, keyed by learningKey().
+   *
+   * The guesser is a fixed vocabulary and will always be wrong about something
+   * — a favourite restaurant with an unguessable name, a personal shorthand.
+   * Rather than grow the word list forever, remember the correction: the next
+   * expense with the same words gets it right without being asked twice.
+   *
+   * Device-local, like customCategories, because it is a preference rather
+   * than shared data — two people in a group can disagree about what "Tuesday
+   * regulars" means and both be right.
+   */
+  learnedCategories: Record<string, string>;
   loaded: boolean;
   load: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => void;
   addCategory: (name: string) => string;
   removeCategory: (name: string) => void;
+  /** Remember that this description means this category. */
+  learnCategory: (description: string, category: string) => void;
 }
 
 /** Lower-case, trimmed, single-spaced — categories are compared as strings. */
@@ -34,6 +51,7 @@ export function normaliseCategory(name: string): string {
 export const useSettings = create<Settings>((set, get) => ({
   themeMode: 'dark',
   customCategories: [],
+  learnedCategories: {},
   loaded: false,
 
   load: async () => {
@@ -44,6 +62,9 @@ export const useSettings = create<Settings>((set, get) => ({
         if (saved.themeMode) set({ themeMode: saved.themeMode });
         if (Array.isArray(saved.customCategories)) {
           set({ customCategories: saved.customCategories });
+        }
+        if (saved.learnedCategories && typeof saved.learnedCategories === 'object') {
+          set({ learnedCategories: saved.learnedCategories });
         }
       }
     } catch {
@@ -73,11 +94,26 @@ export const useSettings = create<Settings>((set, get) => ({
     set({ customCategories: get().customCategories.filter((x) => x !== name) });
     persist(get());
   },
+
+  learnCategory: (description, category) => {
+    const key = learningKey(description);
+    const clean = normaliseCategory(category);
+    // An empty description has no key to file the lesson under, and 'general'
+    // is the absence of a category rather than a choice worth remembering.
+    if (!key || !clean || clean === 'general') return;
+    if (get().learnedCategories[key] === clean) return;
+    set({ learnedCategories: { ...get().learnedCategories, [key]: clean } });
+    persist(get());
+  },
 }));
 
 function persist(state: Settings) {
   void AsyncStorage.setItem(
     KEY,
-    JSON.stringify({ themeMode: state.themeMode, customCategories: state.customCategories })
+    JSON.stringify({
+      themeMode: state.themeMode,
+      customCategories: state.customCategories,
+      learnedCategories: state.learnedCategories,
+    })
   ).catch(() => {});
 }

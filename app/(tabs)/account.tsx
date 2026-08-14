@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 
 import { Avatar, Button, ConfirmDialog, Divider, Row, SectionTitle } from '../../src/components/ui';
-import { useOverallBalance } from '../../src/store/selectors';
+import { useGoogleSignIn } from '../../src/lib/googleAuth';
+import { disablePush, enablePush, pushState, type PushState } from '../../src/lib/push';
+import { usePersonalExpenses, useOverallBalance, useSharedGroups } from '../../src/store/selectors';
 import { useAuth } from '../../src/store/useAuth';
 import { useSettings, type ThemeMode } from '../../src/store/useSettings';
 import { getLastPushError } from '../../src/store/useStore';
@@ -14,7 +16,10 @@ import { font, spacing, useColors } from '../../src/theme';
 export default function AccountScreen() {
   const c = useColors();
   const people = useStore((s) => s.people);
-  const groups = useStore((s) => s.groups);
+  // Shared only: the personal ledger has a count of its own below, and folding
+  // it into "Groups" makes that number disagree with the Groups tab.
+  const groups = useSharedGroups();
+  const personalExpenses = usePersonalExpenses();
   const expenses = useStore((s) => s.expenses);
   const meId = useStore((s) => s.meId);
   const clearAll = useStore((s) => s.clearAll);
@@ -34,6 +39,75 @@ export default function AccountScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncedAt, setSyncedAt] = useState('');
 
+  const [notifications, setNotifications] = useState<PushState>('unsupported');
+  const [notifyBusy, setNotifyBusy] = useState(false);
+  const [notifyError, setNotifyError] = useState('');
+
+  const hasGoogle = useAuth((s) => s.hasGoogle);
+  const hasPassword = useAuth((s) => s.hasPassword);
+  const linkGoogle = useAuth((s) => s.linkGoogle);
+  const unlinkGoogle = useAuth((s) => s.unlinkGoogle);
+  const [linkMessage, setLinkMessage] = useState('');
+
+  // Same PKCE flow as the sign-in screen, pointed at the link endpoint: this
+  // one attaches the Google account to the session already signed in rather
+  // than signing in as whoever the Google account belongs to.
+  const google = useGoogleSignIn(
+    useCallback(
+      (result) => {
+        void (async () => {
+          const outcome = await linkGoogle(result);
+          setLinkMessage(
+            outcome.ok ? 'Google account linked.' : outcome.error ?? 'Could not link that account'
+          );
+        })();
+      },
+      [linkGoogle]
+    )
+  );
+
+  const doUnlinkGoogle = async () => {
+    const outcome = await unlinkGoogle();
+    setLinkMessage(outcome.ok ? 'Google account unlinked.' : outcome.error ?? 'Could not unlink');
+  };
+
+  const googleSubtitle = hasGoogle
+    ? hasPassword
+      ? 'Google or password'
+      : 'The only way into this account'
+    : google.available
+      ? 'Sign in with Google too'
+      : 'Not configured';
+
+  // Read the real browser state on mount: the permission and the subscription
+  // both outlive the app, so trusting a remembered flag would show a switch
+  // that disagrees with what the browser is actually doing.
+  useEffect(() => {
+    void pushState().then(setNotifications);
+  }, []);
+
+  const toggleNotifications = async (next: boolean) => {
+    setNotifyBusy(true);
+    setNotifyError('');
+    try {
+      setNotifications(next ? await enablePush() : await disablePush());
+    } catch (err) {
+      setNotifyError(err instanceof Error ? err.message : 'Could not change that');
+      setNotifications(await pushState());
+    } finally {
+      setNotifyBusy(false);
+    }
+  };
+
+  const notifySubtitle =
+    notifications === 'unsupported'
+      ? 'Web app only'
+      : notifications === 'denied'
+      ? 'Blocked in your browser settings'
+      : notifications === 'on'
+      ? 'On'
+      : 'When someone adds an expense';
+
   const doSync = async () => {
     setSyncing(true);
     await refresh();
@@ -46,10 +120,10 @@ export default function AccountScreen() {
   const syncSubtitle = syncing
     ? 'Syncing…'
     : offline
-    ? 'Could not reach the server — showing the last copy on this device'
+    ? 'Offline — showing the last copy'
     : syncedAt
-    ? `Last synced at ${syncedAt}`
-    : 'Pull the latest from your server';
+    ? `Last synced ${syncedAt}`
+    : 'Pull the latest';
 
   const doClear = async () => {
     setConfirming(null);
@@ -60,7 +134,14 @@ export default function AccountScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }}>
       <View style={{ alignItems: 'center', paddingVertical: spacing.xl }}>
-        <Avatar name={me?.name ?? 'You'} colorIndex={me?.colorIndex ?? 0} size={72} />
+        {/* The avatar is where people reach for this, ahead of any row below. */}
+        <Pressable
+          onPress={() => router.push('/profile')}
+          accessibilityRole="button"
+          accessibilityLabel="Edit profile"
+        >
+          <Avatar name={me?.name ?? 'You'} colorIndex={me?.colorIndex ?? 0} size={72} />
+        </Pressable>
         <Text style={[font.h2, { marginTop: spacing.md }, { color: c.text }]}>{me?.name ?? 'You'}</Text>
         {authUser?.email ? (
           <Text style={[font.small, { color: c.textFaint }]}>{authUser.email}</Text>
@@ -92,6 +173,46 @@ export default function AccountScreen() {
         </View>
       ) : null}
 
+      <SectionTitle>Account</SectionTitle>
+      <Row
+        left={<Ionicons name="person-circle-outline" size={22} color={c.textMuted} />}
+        title="Edit profile"
+        subtitle="Name and avatar"
+        onPress={() => router.push('/profile')}
+        chevron
+      />
+      <Divider />
+      <Row
+        left={
+          <Ionicons name="logo-google" size={20} color={hasGoogle ? c.owed : c.textMuted} />
+        }
+        title={hasGoogle ? 'Google linked' : 'Link Google account'}
+        subtitle={googleSubtitle}
+        // Unlinking is only offered when a password exists to fall back on;
+        // the server refuses it otherwise, and offering it would be a trap.
+        onPress={
+          hasGoogle
+            ? hasPassword
+              ? () => void doUnlinkGoogle()
+              : undefined
+            : google.available
+              ? () => void google.promptAsync()
+              : undefined
+        }
+        right={
+          hasGoogle && hasPassword ? (
+            <Text style={[font.small, { color: c.danger }]}>Unlink</Text>
+          ) : hasGoogle ? (
+            <Ionicons name="checkmark-circle" size={20} color={c.owed} />
+          ) : null
+        }
+      />
+      {linkMessage || google.error ? (
+        <Text style={[font.small, { color: c.textMuted, paddingHorizontal: spacing.lg, paddingTop: spacing.sm }]}>
+          {linkMessage || google.error}
+        </Text>
+      ) : null}
+
       <SectionTitle>Appearance</SectionTitle>
       <View style={{ flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg }}>
         {(['dark', 'light', 'system'] as ThemeMode[]).map((mode) => {
@@ -118,19 +239,68 @@ export default function AccountScreen() {
         })}
       </View>
 
+      <SectionTitle>Notifications</SectionTitle>
+      <Row
+        left={
+          <Ionicons
+            name={notifications === 'on' ? 'notifications' : 'notifications-outline'}
+            size={22}
+            color={notifications === 'on' ? c.owed : c.textMuted}
+          />
+        }
+        title="New expense alerts"
+        subtitle={notifySubtitle}
+        right={
+          notifyBusy ? (
+            <ActivityIndicator color={c.owed} />
+          ) : (
+            <Switch
+              value={notifications === 'on'}
+              disabled={notifications === 'unsupported' || notifications === 'denied'}
+              onValueChange={(next) => void toggleNotifications(next)}
+              trackColor={{ true: c.owed, false: c.border }}
+            />
+          )
+        }
+      />
+      {notifyError ? (
+        <Text style={[font.small, { color: c.danger, paddingHorizontal: spacing.lg }]}>
+          {notifyError}
+        </Text>
+      ) : null}
+
       <SectionTitle>Your data</SectionTitle>
       <Row left={<Ionicons name="people-outline" size={22} color={c.textMuted} />} title="Groups" right={<Text style={[font.body, { color: c.text }]}>{groups.length}</Text>} />
       <Divider />
       <Row left={<Ionicons name="person-outline" size={22} color={c.textMuted} />} title="Friends" right={<Text style={[font.body, { color: c.text }]}>{Math.max(0, people.length - 1)}</Text>} />
       <Divider />
       <Row left={<Ionicons name="receipt-outline" size={22} color={c.textMuted} />} title="Expenses" right={<Text style={[font.body, { color: c.text }]}>{expenses.length}</Text>} />
+      <Divider />
+      <Row left={<Ionicons name="wallet-outline" size={22} color={c.textMuted} />} title="Personal" right={<Text style={[font.body, { color: c.text }]}>{personalExpenses.length}</Text>} />
 
       <SectionTitle>Reports</SectionTitle>
       <Row
         left={<Ionicons name="bar-chart-outline" size={22} color={c.owed} />}
         title="Your spending"
-        subtitle="Everything you have spent, across every group"
+        subtitle="Everything you have spent, groups and personal together"
         onPress={() => router.push('/report/me')}
+        chevron
+      />
+      <Divider />
+      <Row
+        left={<Ionicons name="wallet-outline" size={22} color={c.owed} />}
+        title="Personal spending"
+        subtitle="Only the expenses that are yours alone"
+        onPress={() => router.push('/report/personal')}
+        chevron
+      />
+
+      <Divider />
+      <Row
+        left={<Ionicons name="phone-portrait-outline" size={22} color={c.owed} />}
+        title="Back Tap to add"
+        subtitle="Double-tap your iPhone to log an expense"
+        onPress={() => router.push('/shortcut')}
         chevron
       />
 

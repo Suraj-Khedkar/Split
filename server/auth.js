@@ -51,10 +51,10 @@ export function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
-export function createSession(db, userId) {
+export function createSession(db, userId, days = SESSION_DAYS) {
   const { token, hash } = newSessionToken();
   const now = new Date();
-  const expires = new Date(now.getTime() + SESSION_DAYS * 864e5);
+  const expires = new Date(now.getTime() + days * 864e5);
   db.prepare(
     'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
   ).run(hash, userId, now.toISOString(), expires.toISOString());

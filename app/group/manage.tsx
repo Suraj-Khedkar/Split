@@ -3,7 +3,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { Button, Divider, EmptyState, Row, SectionTitle } from '../../src/components/ui';
+import { Avatar, Button, Divider, EmptyState, Row, SectionTitle } from '../../src/components/ui';
 import { api } from '../../src/lib/api';
 import { useAuth } from '../../src/store/useAuth';
 import { useStore } from '../../src/store/useStore';
@@ -120,6 +120,13 @@ export default function ManageGroupScreen() {
         return (
           <View key={id}>
             <Row
+              left={
+                <Avatar
+                  name={person?.name ?? '?'}
+                  colorIndex={person?.colorIndex ?? 0}
+                  size={36}
+                />
+              }
               title={id === meId ? 'You' : person?.name ?? 'Someone'}
               subtitle={alias ? 'No account yet' : undefined}
               right={
@@ -148,11 +155,9 @@ export default function ManageGroupScreen() {
           </View>
         );
       })}
+      <SectionTitle>Add someone by name</SectionTitle>
       <Text style={styles.hint}>
-        Someone tracked by name can claim their history here once they sign up and join.
-      </Text>
-      <Text style={styles.hint}>
-        Add someone who has no account yet. To invite a real person, use Invite instead.
+        For people with no account. To invite a real person, use Invite.
       </Text>
       <TextInput
         value={newMember}
@@ -188,7 +193,7 @@ export default function ManageGroupScreen() {
         />
         <Button title="Delete group" variant="danger" onPress={remove} loading={busy === 'delete'} />
         <Text style={[font.small, { color: c.textFaint }]}>
-          Leaving requires you to be settled up. Only the person who created the group can delete it.
+          Leaving needs you settled up. Only the creator can delete.
         </Text>
       </View>
     </ScrollView>

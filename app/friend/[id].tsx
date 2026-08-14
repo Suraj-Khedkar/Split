@@ -1,11 +1,21 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Avatar, Button, Divider, EmptyState, Row } from '../../src/components/ui';
+import {
+  Avatar,
+  Button,
+  ConfirmDialog,
+  Divider,
+  EmptyState,
+  Row,
+} from '../../src/components/ui';
+import { api } from '../../src/lib/api';
 import { balanceBetween } from '../../src/lib/balances';
+import { describeEntry } from '../../src/lib/entries';
 import { formatMoney } from '../../src/lib/money';
 import { usePersonExpenses } from '../../src/store/selectors';
+import { useAuth } from '../../src/store/useAuth';
 import { personName, useStore } from '../../src/store/useStore';
 import { Palette, balanceColor, font, spacing, useColors } from '../../src/theme';
 
@@ -18,6 +28,12 @@ export default function FriendScreen() {
   const groups = useStore((s) => s.groups);
   const expenses = useStore((s) => s.expenses);
   const meId = useStore((s) => s.meId);
+  const friendIds = useStore((s) => s.friendIds);
+  const refresh = useAuth((s) => s.refresh);
+  // Declared before the early return below, or the hook order changes.
+  const [confirming, setConfirming] = useState(false);
+  const [removeError, setRemoveError] = useState('');
+  const [removing, setRemoving] = useState(false);
 
   const person = people.find((p) => p.id === id);
   const shared = usePersonExpenses(id ?? '').filter((e) =>
@@ -26,6 +42,28 @@ export default function FriendScreen() {
   const net = balanceBetween(expenses, meId, id ?? '');
 
   if (!person) return <EmptyState icon="alert-circle-outline" title="Friend not found" />;
+
+  const isFriend = friendIds.includes(person.id);
+  // Named locally so the message can list them; the server checks this too and
+  // is the one that actually refuses — this only saves a pointless round trip.
+  const sharedGroups = groups.filter(
+    (g) => g.type !== 'personal' && g.memberIds.includes(meId) && g.memberIds.includes(person.id)
+  );
+
+  const removeFriend = async () => {
+    setConfirming(false);
+    setRemoving(true);
+    setRemoveError('');
+    try {
+      await api.removeFriend(person.id);
+      await refresh();
+      router.back();
+    } catch (err) {
+      setRemoveError(err instanceof Error ? err.message : 'Could not remove that friend');
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }}>
@@ -63,27 +101,73 @@ export default function FriendScreen() {
         </View>
       </View>
 
+      {isFriend ? (
+        <View style={{ padding: spacing.lg }}>
+          <Button
+            title="Remove friend"
+            variant="secondary"
+            loading={removing}
+            onPress={() => {
+              if (sharedGroups.length) {
+                setRemoveError(
+                  `You still share ${sharedGroups.length === 1 ? 'a group' : 'groups'} with ${person.name} (${sharedGroups
+                    .map((g) => g.name)
+                    .join(', ')}). Leave ${sharedGroups.length === 1 ? 'it' : 'those'} first.`
+                );
+                return;
+              }
+              setConfirming(true);
+            }}
+          />
+          {removeError ? (
+            <Text style={[font.small, { color: c.owe, marginTop: spacing.sm }]}>
+              {removeError}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      <ConfirmDialog
+        visible={confirming}
+        title={`Remove ${person.name}?`}
+        message="You will drop off each other's friend lists. Shared history stays where it is."
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => void removeFriend()}
+        onCancel={() => setConfirming(false)}
+      />
+
       {shared.length === 0 ? (
         <EmptyState icon="receipt-outline" title="Nothing shared yet" />
       ) : (
         shared.map((expense, index) => {
           const group = groups.find((g) => g.id === expense.groupId);
-          const myShare = expense.splits.find((s) => s.personId === meId)?.amount ?? 0;
-          const myPaid = expense.paidBy.find((p) => p.personId === meId)?.amount ?? 0;
-          const delta = myPaid - myShare;
+          const entry = describeEntry(expense, people, meId);
           return (
             <View key={expense.id}>
               <Row
-                title={expense.description}
-                subtitle={`${group?.name ?? 'No group'} · ${personName(
-                  people,
-                  expense.paidBy[0]?.personId ?? '',
-                  meId
-                )} paid ${formatMoney(expense.amount, expense.currency)}`}
+                title={entry.title}
+                subtitle={
+                  entry.isPayback
+                    ? // A payback settled a debt; who "paid" the bill is not the
+                      // interesting fact, the fact that it cleared is.
+                      `Payback · ${formatMoney(expense.amount, expense.currency)}`
+                    : `${group?.name ?? 'No group'} · ${personName(
+                        people,
+                        expense.paidBy[0]?.personId ?? '',
+                        meId
+                      )} paid ${formatMoney(expense.amount, expense.currency)}`
+                }
                 right={
-                  <Text style={[font.bodyStrong, { color: balanceColor(delta, c) }]}>
-                    {delta === 0 ? '—' : formatMoney(Math.abs(delta), expense.currency)}
-                  </Text>
+                  entry.isPayback ? (
+                    <Text style={[font.small, { color: c.settled }]}>settled</Text>
+                  ) : (
+                    <Text style={[font.bodyStrong, { color: balanceColor(entry.delta, c) }]}>
+                      {entry.delta === 0
+                        ? '—'
+                        : formatMoney(Math.abs(entry.delta), expense.currency)}
+                    </Text>
+                  )
                 }
                 onPress={() => router.push(`/expense/${expense.id}`)}
               />

@@ -1,28 +1,80 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Amount, BalanceLabel, EmptyState, Fab, GroupIcon } from '../../src/components/ui';
-import { computeBalances, netForPerson } from '../../src/lib/balances';
-import { useOverallBalance } from '../../src/store/selectors';
-import { useStore } from '../../src/store/useStore';
+import {
+  useGroupBuckets,
+  useOverallBalance,
+  type GroupRow,
+} from '../../src/store/selectors';
 import { Palette, font, spacing, useColors } from '../../src/theme';
+
+/**
+ * One flat list rather than a SectionList: the rows are not uniform — headers
+ * and the "show hidden" control sit between them — and a discriminated union
+ * keeps that explicit instead of smuggling it through section metadata.
+ */
+type Item =
+  | { kind: 'header'; key: string; label: string }
+  | { kind: 'group'; key: string; row: GroupRow }
+  | { kind: 'toggle'; key: string; count: number; open: boolean };
 
 export default function GroupsScreen() {
   const c = useColors();
   const styles = useMemo(() => makeStyles(c), [c]);
   const router = useRouter();
-  const groups = useStore((s) => s.groups);
-  const expenses = useStore((s) => s.expenses);
-  const meId = useStore((s) => s.meId);
+  const { active, settled, dormant } = useGroupBuckets();
   const overall = useOverallBalance();
+  const [showDormant, setShowDormant] = useState(false);
 
-  const rows = groups.map((group) => {
-    const groupExpenses = expenses.filter((e) => e.groupId === group.id);
-    const myNet = netForPerson(computeBalances(groupExpenses), meId);
-    return { group, myNet };
-  });
+  const items: Item[] = [];
+  if (active.length > 0) {
+    // No header when there is nothing to distinguish it from.
+    if (settled.length > 0 || dormant.length > 0) {
+      items.push({ kind: 'header', key: 'h-active', label: 'Active' });
+    }
+    for (const row of active) items.push({ kind: 'group', key: row.group.id, row });
+  }
+  if (settled.length > 0) {
+    items.push({
+      kind: 'header',
+      key: 'h-settled',
+      label: 'Settled up',
+    });
+    for (const row of settled) items.push({ kind: 'group', key: row.group.id, row });
+  }
+  if (dormant.length > 0) {
+    items.push({ kind: 'toggle', key: 'toggle', count: dormant.length, open: showDormant });
+    if (showDormant) {
+      for (const row of dormant) items.push({ kind: 'group', key: row.group.id, row });
+    }
+  }
+
+  const renderGroup = (row: GroupRow, muted: boolean) => (
+    <Pressable
+      onPress={() => router.push(`/group/${row.group.id}`)}
+      style={({ pressed }) => [
+        styles.groupRow,
+        { backgroundColor: pressed ? c.surface : c.card },
+        muted && { opacity: 0.72 },
+      ]}
+    >
+      <GroupIcon type={row.group.type} />
+      <View style={{ flex: 1, marginLeft: spacing.md }}>
+        <Text style={[font.bodyStrong, { color: c.text }]}>{row.group.name}</Text>
+        <View style={{ marginTop: 2 }}>
+          {row.settled ? (
+            <Text style={[font.small, { color: c.settled }]}>Settled up</Text>
+          ) : (
+            <BalanceLabel amount={row.myNet} currency={row.group.currency} />
+          )}
+        </View>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={c.textFaint} />
+    </Pressable>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -55,8 +107,8 @@ export default function GroupsScreen() {
       </View>
 
       <FlatList
-        data={rows}
-        keyExtractor={(item) => item.group.id}
+        data={items}
+        keyExtractor={(item) => item.key}
         contentContainerStyle={{ paddingBottom: 120 }}
         ListEmptyComponent={
           <EmptyState
@@ -65,24 +117,42 @@ export default function GroupsScreen() {
             body="Create a group for a trip, a flat, or anything you split regularly."
           />
         }
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => router.push(`/group/${item.group.id}`)}
-            style={({ pressed }) => [
-              styles.groupRow,
-              { backgroundColor: pressed ? c.surface : c.card },
-            ]}
-          >
-            <GroupIcon type={item.group.type} />
-            <View style={{ flex: 1, marginLeft: spacing.md }}>
-              <Text style={[font.bodyStrong, { color: c.text }]}>{item.group.name}</Text>
-              <View style={{ marginTop: 2 }}>
-                <BalanceLabel amount={item.myNet} currency={item.group.currency} />
+        renderItem={({ item }) => {
+          if (item.kind === 'header') {
+            return (
+              <View style={styles.sectionHeader}>
+                <Text style={[font.small, { color: c.textMuted, fontWeight: '700' }]}>
+                  {item.label.toUpperCase()}
+                </Text>
               </View>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={c.textFaint} />
-          </Pressable>
-        )}
+            );
+          }
+
+          if (item.kind === 'toggle') {
+            return (
+              <Pressable
+                onPress={() => setShowDormant((v) => !v)}
+                style={({ pressed }) => [
+                  styles.toggle,
+                  { backgroundColor: pressed ? c.surface : 'transparent' },
+                ]}
+              >
+                <Ionicons
+                  name={item.open ? 'chevron-up' : 'archive-outline'}
+                  size={18}
+                  color={c.textMuted}
+                />
+                <Text style={[font.small, { color: c.textMuted, marginLeft: spacing.sm, flex: 1 }]}>
+                  {item.open
+                    ? 'Hide older'
+                    : `${item.count} older settled group${item.count === 1 ? '' : 's'}`}
+                </Text>
+              </Pressable>
+            );
+          }
+
+          return renderGroup(item.row, !item.row.settled ? false : true);
+        }}
         ListFooterComponent={
           <>
             <Link href="/group/new" asChild>
@@ -117,6 +187,18 @@ const makeStyles = (c: Palette) =>
     paddingBottom: spacing.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
+  },
+  sectionHeader: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  toggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
   },
   groupRow: {
     flexDirection: 'row',

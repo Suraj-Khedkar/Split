@@ -1,5 +1,5 @@
 {
-  "name": "splitwise-clone",
+  "name": "split-and-track",
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
@@ -48,7 +48,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "test": "tsx --test src/lib/__tests__/*.test.ts",
+    "test": "tsx --test src/lib/__tests__/*.test.ts && node --test server/__tests__/*.test.js",
     "typecheck": "tsc --noEmit",
     "start:lan": "expo start",
     "start:tunnel": "expo start --tunnel",

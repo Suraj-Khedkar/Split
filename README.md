@@ -1,4 +1,4 @@
-# Splitwise Clone
+# Split &amp; Track
 
 A shared-expense tracker built with Expo (React Native) — **one codebase, running
 on Android, iOS and the web**. Add expenses to a group, split them four different
@@ -70,14 +70,18 @@ The web build is live on the internet at:
 Funnel only permits three ports — **443, 8443, 10000** — so services share it by
 taking a port each. On this machine:
 
-| Port | Service |
-|---|---|
-| 443 | Nextcloud (local nginx; not funnelled) |
-| 8443 | Immich |
-| 10000 | Splitwise Clone |
+| Port | Service | Funnelled |
+|---|---|---|
+| 443 | Nextcloud | yes → `127.0.0.1:443` |
+| 8443 | Immich | yes → `127.0.0.1:2283` |
+| 10000 | Split &amp; Track | yes → `:3000` (app) and `:4000` (`/api`) |
 
-Splitwise deliberately avoids 443: nginx already binds `0.0.0.0:443`, and a
-Funnel there shadows it for IPv6 clients, which would break Nextcloud.
+All three are public. The nginx container in `~/Documents/personal-cloud`
+fronts Nextcloud and Immich, and its 443 binding is deliberately *not*
+`0.0.0.0`: Funnel must bind 443 on the tailnet address itself, and a wildcard
+bind silently takes it, so `tailscale funnel --https=443` fails. It listens on
+`127.0.0.1` (for Funnel) and `192.168.1.10` (for the LAN) instead — set by
+`HTTPS_BIND` / `HTTPS_LAN_BIND` in that project's `.env`.
 
 To rebuild and publish after changing code:
 

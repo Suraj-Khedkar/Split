@@ -17,6 +17,7 @@ import {
   balanceColor,
   font,
   radius,
+  shadow,
   spacing,
   useColors,
 } from '../theme';
@@ -64,6 +65,8 @@ export function GroupIcon({ type, size = 48 }: { type: string; size?: number }) 
       ? 'home'
       : type === 'couple'
       ? 'heart'
+      : type === 'personal'
+      ? 'wallet'
       : 'people';
   return (
     <View
@@ -94,7 +97,9 @@ export function Amount({
 }) {
   const c = useColors();
   return (
-    <Text style={[font[size], { color: balanceColor(value, c), fontWeight: '600' }]}>
+    <Text
+      style={[font[size], font.numeric, { color: balanceColor(value, c), fontWeight: '600' }]}
+    >
       {formatMoney(value, currency)}
     </Text>
   );
@@ -123,7 +128,7 @@ export function BalanceLabel({
   return (
     <Text style={[font.small, { color: c.textMuted }]}>
       {subject} {verb}{' '}
-      <Text style={{ color: balanceColor(amount, c), fontWeight: '600' }}>
+      <Text style={[font.numeric, { color: balanceColor(amount, c), fontWeight: '600' }]}>
         {formatMoney(amount, currency)}
       </Text>
     </Text>
@@ -186,7 +191,7 @@ export function Row({
 }) {
   const c = useColors();
   const content = (
-    <View style={styles.row}>
+    <View style={[styles.row, { backgroundColor: c.card }]}>
       {left ? <View style={{ marginRight: spacing.md }}>{left}</View> : null}
       <View style={{ flex: 1 }}>
         <Text style={[font.bodyStrong, { color: c.text }]} numberOfLines={1}>
@@ -228,7 +233,7 @@ export function Row({
 
 export function SectionTitle({ children }: { children: React.ReactNode }) {
   const c = useColors();
-  return <Text style={[styles.sectionTitle, { color: c.textFaint }]}>{children}</Text>;
+  return <Text style={[styles.sectionTitle, { color: c.textMuted }]}>{children}</Text>;
 }
 
 export function EmptyState({
@@ -243,8 +248,10 @@ export function EmptyState({
   const c = useColors();
   return (
     <View style={styles.empty}>
-      <Ionicons name={icon as never} size={44} color={c.textFaint} />
-      <Text style={[font.h3, { marginTop: spacing.md, color: c.text }]}>{title}</Text>
+      <View style={[styles.emptyIcon, { backgroundColor: c.surface }]}>
+        <Ionicons name={icon as never} size={30} color={c.textFaint} />
+      </View>
+      <Text style={[font.h3, { marginTop: spacing.lg, color: c.text }]}>{title}</Text>
       {body ? (
         <Text
           style={[
@@ -279,10 +286,14 @@ export function Fab({
       android_ripple={{ color: c.pressed }}
       // 0.9 opacity was the previous "feedback" and was imperceptible; a tap
       // has to be obvious on a button this important.
+      //
+      // The fill was c.owe — the orange that means "you owe money" everywhere
+      // else. Spending a semantic colour on a plain action made the most
+      // prominent control on the screen read as a warning.
       style={({ pressed }) => [
         styles.fab,
         {
-          backgroundColor: c.owe,
+          backgroundColor: c.owed,
           opacity: pressed ? 0.7 : 1,
           transform: [{ scale: pressed ? 0.96 : 1 }],
         },
@@ -439,7 +450,7 @@ export function PromptDialog({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing.xl,
@@ -449,6 +460,7 @@ const styles = StyleSheet.create({
     maxWidth: 380,
     borderRadius: radius.lg,
     padding: spacing.xl,
+    ...shadow.floating,
   },
   dialogActions: {
     flexDirection: 'row',
@@ -459,7 +471,7 @@ const styles = StyleSheet.create({
   avatarText: { color: '#FFF', fontWeight: '700' },
   center: { alignItems: 'center', justifyContent: 'center' },
   button: {
-    paddingVertical: 14,
+    paddingVertical: 15,
     paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
     alignItems: 'center',
@@ -469,20 +481,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingVertical: 14,
   },
   sectionTitle: {
-    ...font.tiny,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    ...font.small,
+    fontWeight: '600',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
+    paddingTop: spacing.xl,
     paddingBottom: spacing.sm,
   },
   empty: {
     alignItems: 'center',
     paddingVertical: spacing.xxl * 1.5,
     paddingHorizontal: spacing.xl,
+  },
+  emptyIcon: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: spacing.lg },
   fab: {
@@ -494,10 +512,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: 14,
     borderRadius: radius.pill,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 5,
+    ...shadow.floating,
   },
 });

@@ -7,7 +7,7 @@ import {
   simplifyDebts,
 } from '../lib/balances';
 import { CATEGORIES } from '../theme';
-import type { Balance, Debt, Expense } from '../types';
+import type { Balance, Debt, Expense, Group } from '../types';
 import { useSettings } from './useSettings';
 import { useStore } from './useStore';
 
@@ -31,6 +31,36 @@ export function useCategories(): string[] {
     all.delete('settlement');
     return [...all];
   }, [expenses, custom]);
+}
+
+/**
+ * Groups you actually share with someone — everything the Groups tab shows.
+ *
+ * The personal ledger is deliberately excluded: it has one member, no
+ * balances, and listing it beside real groups invites settling up with
+ * yourself.
+ */
+export function useSharedGroups(): Group[] {
+  const groups = useStore((s) => s.groups);
+  return useMemo(() => groups.filter((g) => g.type !== 'personal'), [groups]);
+}
+
+/** The private single-member group holding solo spending, once synced. */
+export function usePersonalGroup(): Group | null {
+  const groups = useStore((s) => s.groups);
+  return useMemo(() => groups.find((g) => g.type === 'personal') ?? null, [groups]);
+}
+
+/** Solo spends, newest first. Empty until the first sync creates the group. */
+export function usePersonalExpenses(): Expense[] {
+  const expenses = useStore((s) => s.expenses);
+  const personal = usePersonalGroup();
+  return useMemo(() => {
+    if (!personal) return [];
+    return expenses
+      .filter((e) => e.groupId === personal.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [expenses, personal]);
 }
 
 /** Expenses belonging to one group, newest first. */
@@ -63,6 +93,75 @@ export function useGroupSummary(groupId: string): GroupSummary {
       myNet: netForPerson(balances, meId),
     };
   }, [expenses, meId]);
+}
+
+/** A settled group goes quiet for this long before it stops being listed. */
+export const DORMANT_AFTER_DAYS = 30;
+
+export interface GroupRow {
+  group: Group;
+  /** What the device owner is up or down here. */
+  myNet: number;
+  /** True when nobody in the group owes anybody — not just the device owner. */
+  settled: boolean;
+  /** Newest expense, or the group's creation date when it has none. */
+  lastActivityAt: string;
+}
+
+export interface GroupBuckets {
+  /** Money still outstanding. Always visible. */
+  active: GroupRow[];
+  /** Squared up, but recently used — listed under the active ones. */
+  settled: GroupRow[];
+  /** Squared up and quiet for a month. Hidden until asked for, never deleted. */
+  dormant: GroupRow[];
+}
+
+/**
+ * Split the shared groups into what still needs attention and what does not.
+ *
+ * "Settled" means every member's balance is zero, not just the device owner's:
+ * a group where you are square but two other people are not is still live, and
+ * burying it would hide money that is genuinely owed.
+ */
+export function useGroupBuckets(): GroupBuckets {
+  const groups = useSharedGroups();
+  const expenses = useStore((s) => s.expenses);
+  const meId = useStore((s) => s.meId);
+
+  return useMemo(() => {
+    const cutoff = Date.now() - DORMANT_AFTER_DAYS * 864e5;
+
+    const rows: GroupRow[] = groups.map((group) => {
+      const mine = expenses.filter((e) => e.groupId === group.id);
+      const balances = computeBalances(mine);
+      const newest = mine.reduce(
+        (latest, e) => (e.createdAt > latest ? e.createdAt : latest),
+        group.createdAt ?? ''
+      );
+      return {
+        group,
+        myNet: netForPerson(balances, meId),
+        // Rounding to the paisa: split remainders can leave a stray unit that
+        // would otherwise keep a finished group looking active forever.
+        settled: balances.every((b) => Math.round(b.amount) === 0),
+        lastActivityAt: newest,
+      };
+    });
+
+    const byRecency = (a: GroupRow, b: GroupRow) =>
+      b.lastActivityAt.localeCompare(a.lastActivityAt);
+
+    return {
+      active: rows.filter((r) => !r.settled).sort(byRecency),
+      settled: rows
+        .filter((r) => r.settled && new Date(r.lastActivityAt).getTime() >= cutoff)
+        .sort(byRecency),
+      dormant: rows
+        .filter((r) => r.settled && new Date(r.lastActivityAt).getTime() < cutoff)
+        .sort(byRecency),
+    };
+  }, [groups, expenses, meId]);
 }
 
 /** Headline figure across every group and one-off expense. */

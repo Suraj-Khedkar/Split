@@ -5,7 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { Avatar, Button, SectionTitle } from '../../src/components/ui';
 import { balanceBetween } from '../../src/lib/balances';
 import { currencySymbol, formatAmount, formatMoney, parseAmount } from '../../src/lib/money';
-import { useGroupSummary } from '../../src/store/selectors';
+import { useGroupExpenses, useGroupSummary } from '../../src/store/selectors';
 import { personName, useStore } from '../../src/store/useStore';
 import { Palette, font, radius, spacing, useColors } from '../../src/theme';
 
@@ -25,6 +25,19 @@ export default function SettleScreen() {
   const group = groups.find((g) => g.id === groupId);
   const currency = group?.currency ?? 'INR';
   const { debts } = useGroupSummary(group?.id ?? '');
+  const groupExpenses = useGroupExpenses(group?.id ?? '');
+
+  /**
+   * The ledger this screen is allowed to reason about.
+   *
+   * Inside a group, only that group's expenses count. Using the whole store
+   * here was a real bug and not only a cosmetic one: it drives `iAmPayer`
+   * below, so a pair who are owed money in one group and owe it in another
+   * got the summary line AND the recorded direction of the payment backwards.
+   * Settling with a friend outside any group is the one case that genuinely
+   * spans everything.
+   */
+  const ledger = group ? groupExpenses : expenses;
 
   const candidates = group
     ? group.memberIds.filter((id) => id !== meId)
@@ -34,12 +47,12 @@ export default function SettleScreen() {
   const suggested = group
     ? debts.find((d) => d.fromId === meId && d.toId === withId)?.amount ??
       debts.find((d) => d.fromId === withId && d.toId === meId)?.amount ??
-      Math.abs(balanceBetween(expenses, meId, withId))
-    : Math.abs(balanceBetween(expenses, meId, withId));
+      Math.abs(balanceBetween(ledger, meId, withId))
+    : Math.abs(balanceBetween(ledger, meId, withId));
 
   const [amountText, setAmountText] = useState(formatAmount(suggested, currency));
   const amount = parseAmount(amountText);
-  const net = balanceBetween(expenses, meId, withId);
+  const net = balanceBetween(ledger, meId, withId);
   // net > 0 means they owe you, so they are the payer.
   const iAmPayer = net < 0;
 
@@ -72,7 +85,7 @@ export default function SettleScreen() {
               key={id}
               onPress={() => {
                 setWithId(id);
-                setAmountText(formatAmount(Math.abs(balanceBetween(expenses, meId, id)), currency));
+                setAmountText(formatAmount(Math.abs(balanceBetween(ledger, meId, id)), currency));
               }}
               style={[styles.chip, active && styles.chipActive]}
             >

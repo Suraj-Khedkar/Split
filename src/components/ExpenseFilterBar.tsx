@@ -24,9 +24,16 @@ export function ExpenseFilterBar({
   people: peopleIds,
   compact,
   groupIds,
+  onHeader,
 }: {
   filter: ExpenseFilter;
   onChange: (next: ExpenseFilter) => void;
+  /**
+   * Set when the bar sits directly above a tinted header block, so the two
+   * merge into one. Off elsewhere — on the report and the personal tab there
+   * is no block to merge with, and the tint read as a stray band.
+   */
+  onHeader?: boolean;
   /** Restrict the person chips, e.g. to one group's members. */
   people?: string[];
   /** Hide the person row, for screens already scoped to one person. */
@@ -67,7 +74,7 @@ export function ExpenseFilterBar({
     });
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, onHeader && { backgroundColor: c.surface }]}>
       <View style={styles.searchRow}>
         <View style={styles.searchBox}>
           <Ionicons name="search" size={16} color={c.textFaint} />
@@ -91,7 +98,7 @@ export function ExpenseFilterBar({
           android_ripple={{ color: c.pressed, borderless: true }}
           style={({ pressed }) => [
             styles.filterBtn,
-            { borderColor: count ? c.owed : c.border, backgroundColor: pressed ? c.pressed : 'transparent' },
+            { borderColor: count ? c.owed : c.border, backgroundColor: pressed ? c.pressed : c.card },
           ]}
         >
           <Ionicons name="options-outline" size={18} color={count ? c.owed : c.textMuted} />
@@ -247,13 +254,19 @@ export function ExpenseFilterBar({
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    wrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+    // Shares the group header's surface so search and the group summary read
+    // as one block instead of a field floating on the page background.
+    wrap: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.md,
+    },
     searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     searchBox: {
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: c.surface,
+      backgroundColor: c.card,
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
       gap: spacing.sm,
@@ -294,7 +307,7 @@ const makeStyles = (c: Palette) =>
       flex: 1,
       minWidth: 0,
       color: c.text,
-      backgroundColor: c.surface,
+      backgroundColor: c.card,
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
       paddingVertical: 10,

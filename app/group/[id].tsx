@@ -4,20 +4,35 @@ import React, { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ExpenseFilterBar } from '../../src/components/ExpenseFilterBar';
-import {
-  Amount,
-  Avatar,
-  Divider,
-  EmptyState,
-  Fab,
-  Row,
-  SectionTitle,
-} from '../../src/components/ui';
+import { EmptyState, Fab } from '../../src/components/ui';
+import { describeEntry, spendTotal } from '../../src/lib/entries';
 import { emptyFilter, filterExpenses, isFilterActive, type ExpenseFilter } from '../../src/lib/filters';
 import { formatMoney } from '../../src/lib/money';
 import { useGroupExpenses, useGroupSummary } from '../../src/store/selectors';
 import { personName, useStore } from '../../src/store/useStore';
 import { Palette, balanceColor, font, iconForCategory, radius, spacing, useColors } from '../../src/theme';
+import type { Expense } from '../../src/types';
+
+/**
+ * "Today", "Yesterday", or "14 Aug" — dates live in list headers now.
+ *
+ * Every row used to carry its own date, which made three lines of text out of
+ * what is really one fact shared by a run of rows.
+ */
+function dayLabel(iso: string): string {
+  const parsed = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  const startOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const today = new Date();
+  const days = Math.round((startOf(today) - startOf(parsed)) / 864e5);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return parsed.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    ...(parsed.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }),
+  });
+}
 
 /** One of the four things you actually do in a group. */
 function Action({
@@ -51,7 +66,9 @@ function Action({
           borderRadius: 20,
           alignItems: 'center',
           justifyContent: 'center',
-          backgroundColor: accent ? c.owed : c.surface,
+          // c.card, not c.surface: the block these sit on is c.surface now,
+          // and a chip the same colour as its background is not a chip.
+          backgroundColor: accent ? c.owed : c.card,
         }}
       >
         <Ionicons name={icon as never} size={20} color={accent ? c.onDark : c.text} />
@@ -62,6 +79,10 @@ function Action({
     </Pressable>
   );
 }
+
+type ListRow =
+  | { kind: 'date'; key: string; label: string }
+  | { kind: 'expense'; key: string; expense: Expense };
 
 export default function GroupScreen() {
   const c = useColors();
@@ -74,30 +95,46 @@ export default function GroupScreen() {
 
   const group = groups.find((g) => g.id === id);
   const expenses = useGroupExpenses(id ?? '');
-  const { balances, debts, myNet } = useGroupSummary(id ?? '');
+  const { debts, myNet } = useGroupSummary(id ?? '');
 
   const [filter, setFilter] = useState<ExpenseFilter>(emptyFilter);
-  const [showMembers, setShowMembers] = useState(false);
 
   const visible = useMemo(
     () => filterExpenses(expenses, filter, people),
     [expenses, filter, people]
   );
 
+  // Rows interleaved with the date they fall under. Sorted by the expense date
+  // rather than when it was entered, or a bill added today for last week would
+  // open a second heading for a day that already has one further down.
+  const rows = useMemo(() => {
+    const byDate = [...visible].sort(
+      (a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)
+    );
+    const out: ListRow[] = [];
+    let seen = '';
+    for (const expense of byDate) {
+      if (expense.date !== seen) {
+        seen = expense.date;
+        out.push({ kind: 'date', key: `d:${expense.date}`, label: dayLabel(expense.date) });
+      }
+      out.push({ kind: 'expense', key: expense.id, expense });
+    }
+    return out;
+  }, [visible]);
+
   // Counted the same way the list counts, so the header and the list header
   // never show two different numbers for the same thing.
-  const { spend, spendCount, settlementCount } = useMemo(() => {
+  const { spend, spendCount } = useMemo(() => {
     let spend = 0;
     let spendCount = 0;
-    let settlementCount = 0;
     for (const e of expenses) {
-      if (e.isSettlement) settlementCount += 1;
-      else {
+      if (!e.isSettlement) {
         spend += e.amount;
         spendCount += 1;
       }
     }
-    return { spend, spendCount, settlementCount };
+    return { spend, spendCount };
   }, [expenses]);
 
   if (!group) {
@@ -105,7 +142,11 @@ export default function GroupScreen() {
   }
 
   const filtered = isFilterActive(filter);
-  const shownTotal = visible.reduce((sum, e) => sum + e.amount, 0);
+  // Spend only. With "include settlements" on, summing every visible row made
+  // this figure count paybacks as fresh spending and disagree with the hero.
+  const shownTotal = spendTotal(visible);
+  const shownPaybacks = visible.filter((e) => e.isSettlement).length;
+  const shownSpendCount = visible.length - shownPaybacks;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -130,11 +171,12 @@ export default function GroupScreen() {
         filter={filter}
         onChange={setFilter}
         people={group.memberIds}
+        onHeader
       />
 
       <FlatList
-        data={visible}
-        keyExtractor={(item) => item.id}
+        data={rows}
+        keyExtractor={(item) => item.key}
         contentContainerStyle={{ paddingBottom: 140 }}
         // 669 expenses in one group: rendering them all at once is what made
         // this screen crawl. FlatList keeps only what is near the viewport.
@@ -142,7 +184,6 @@ export default function GroupScreen() {
         windowSize={9}
         removeClippedSubviews
         keyboardShouldPersistTaps="handled"
-        ItemSeparatorComponent={Divider}
         ListHeaderComponent={
           <View>
             <View style={styles.hero}>
@@ -153,10 +194,9 @@ export default function GroupScreen() {
                 {formatMoney(Math.abs(myNet), group.currency)}
               </Text>
               <Text style={[font.small, { color: c.textFaint, marginTop: 2 }]}>
-                {formatMoney(spend, group.currency)} spent · {spendCount} expense
-                {spendCount === 1 ? '' : 's'}
-                {settlementCount ? ` · ${settlementCount} settled` : ''} ·{' '}
-                {group.memberIds.length} member{group.memberIds.length === 1 ? '' : 's'}
+                {formatMoney(spend, group.currency)} spent · {group.memberIds.length}{' '}
+                {group.memberIds.length === 1 ? 'member' : 'members'}
+                {debts.length ? ` · ${debts.length} to settle` : ''}
               </Text>
 
               <View style={styles.actions}>
@@ -168,82 +208,27 @@ export default function GroupScreen() {
                 />
                 <Action
                   icon="swap-horizontal"
-                  label="Settle up"
+                  label="Settle"
                   onPress={() => router.push(`/settle/${group.id}`)}
+                />
+                <Action
+                  icon="people-outline"
+                  label="Members"
+                  onPress={() => router.push(`/group/members?groupId=${group.id}`)}
                 />
                 <Action
                   icon="bar-chart-outline"
                   label="Report"
                   onPress={() => router.push(`/report/group?groupId=${group.id}`)}
                 />
-                <Action
-                  icon="person-add-outline"
-                  label="Invite"
-                  onPress={() => router.push(`/group/invite?groupId=${group.id}`)}
-                />
               </View>
             </View>
 
-            {debts.length > 0 ? (
-              <>
-                <SectionTitle>Suggested payments</SectionTitle>
-                <Text style={styles.hint}>
-                  The fewest transfers that clear every balance in this group.
-                </Text>
-                {debts.map((debt, index) => (
-                  <View key={`${debt.fromId}-${debt.toId}-${index}`}>
-                    <Row
-                      left={<Ionicons name="arrow-forward-circle-outline" size={26} color={c.owe} />}
-                      title={`${personName(people, debt.fromId, meId)} → ${personName(people, debt.toId, meId)}`}
-                      subtitle={formatMoney(debt.amount, group.currency)}
-                      onPress={() => router.push(`/settle/${group.id}`)}
-                      chevron
-                    />
-                    {index < debts.length - 1 ? <Divider /> : null}
-                  </View>
-                ))}
-              </>
-            ) : null}
-
-            <Pressable
-              onPress={() => setShowMembers((v) => !v)}
-              android_ripple={{ color: c.pressed }}
-              style={({ pressed }) => [styles.memberToggle, pressed && { backgroundColor: c.pressed }]}
-            >
-              <Text style={[font.small, { color: c.textFaint, letterSpacing: 0.6 }]}>
-                MEMBERS ({group.memberIds.length})
-              </Text>
-              <Ionicons
-                name={showMembers ? 'chevron-up' : 'chevron-down'}
-                size={16}
-                color={c.textFaint}
-              />
-            </Pressable>
-            {showMembers
-              ? group.memberIds.map((memberId, index) => {
-                  const person = people.find((p) => p.id === memberId);
-                  if (!person) return null;
-                  const net = balances.find((b) => b.personId === memberId)?.amount ?? 0;
-                  return (
-                    <View key={memberId}>
-                      <Row
-                        left={<Avatar name={person.name} colorIndex={person.colorIndex} size={36} />}
-                        title={personName(people, memberId, meId)}
-                        right={<Amount value={net} currency={group.currency} size="small" />}
-                        onPress={
-                          memberId === meId ? undefined : () => router.push(`/friend/${memberId}`)
-                        }
-                        chevron={memberId !== meId}
-                      />
-                      {index < group.memberIds.length - 1 ? <Divider /> : null}
-                    </View>
-                  );
-                })
-              : null}
 
             <View style={styles.listHeader}>
-              <Text style={[font.small, { color: c.textFaint, letterSpacing: 0.6 }]}>
-                {filtered ? `MATCHING (${visible.length})` : `EXPENSES (${visible.length})`}
+              <Text style={[font.small, { color: c.textFaint }]}>
+                {filtered ? `Matching · ${shownSpendCount}` : `Expenses · ${shownSpendCount}`}
+                {shownPaybacks ? ` · ${shownPaybacks} payback${shownPaybacks === 1 ? '' : 's'}` : ''}
               </Text>
               {filtered ? (
                 <Text style={[font.small, { color: c.owed }]}>
@@ -259,49 +244,70 @@ export default function GroupScreen() {
             title={filtered ? 'Nothing matches' : 'No expenses yet'}
             body={
               filtered
-                ? 'Try a different search, or clear the filters.'
-                : 'Add the first one and balances update instantly.'
+                ? 'Try a different search.'
+                : 'Add the first one to get started.'
             }
           />
         }
-        renderItem={({ item: expense }) => {
+        renderItem={({ item }) => {
+          if (item.kind === 'date') {
+            return (
+              <View style={styles.dateHeader}>
+                <Text style={[font.small, { color: c.textFaint }]}>{item.label}</Text>
+              </View>
+            );
+          }
+
+          const expense = item.expense;
           const payer = expense.paidBy[0];
-          const myShare = expense.splits.find((s) => s.personId === meId)?.amount ?? 0;
-          const myPaid = expense.paidBy.find((p) => p.personId === meId)?.amount ?? 0;
-          const delta = myPaid - myShare;
+          const entry = describeEntry(expense, people, meId);
           return (
             <Pressable
               onPress={() => router.push(`/expense/${expense.id}`)}
               android_ripple={{ color: c.pressed }}
               style={({ pressed }) => ({ backgroundColor: pressed ? c.pressed : c.card })}
             >
+              {/* Two lines, not four. What it was and who paid is enough to
+                  recognise a row; the split, the category and the exact date
+                  are one tap away on the detail screen. */}
               <View style={styles.expenseRow}>
                 <View style={styles.expenseIcon}>
                   <Ionicons
-                    name={iconForCategory(expense.category) as never}
+                    name={
+                      (entry.isPayback
+                        ? 'swap-horizontal-outline'
+                        : iconForCategory(expense.category)) as never
+                    }
                     size={20}
-                    color={c.textMuted}
+                    color={entry.isPayback ? c.settled : c.textMuted}
                   />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[font.bodyStrong, { color: c.text }]} numberOfLines={1}>
-                    {expense.description}
+                    {entry.title}
                   </Text>
-                  <Text style={[font.small, { color: c.textMuted, marginTop: 2 }]}>
-                    {personName(people, payer?.personId ?? '', meId)} paid{' '}
-                    {formatMoney(expense.amount, expense.currency)}
-                  </Text>
-                  <Text style={[font.tiny, { color: c.textFaint, marginTop: 1 }]}>
-                    {expense.date} · {expense.category}
+                  <Text style={[font.small, { color: c.textMuted, marginTop: 2 }]} numberOfLines={1}>
+                    {entry.isPayback
+                      ? 'Payback'
+                      : `${personName(people, payer?.personId ?? '', meId)} paid ${formatMoney(
+                          expense.amount,
+                          expense.currency
+                        )}`}
                   </Text>
                 </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={[font.tiny, { color: c.textFaint }]}>
-                    {delta > 0 ? 'you lent' : delta < 0 ? 'you borrowed' : ''}
-                  </Text>
-                  <Text style={[font.bodyStrong, { color: balanceColor(delta, c) }]}>
-                    {delta === 0 ? '—' : formatMoney(Math.abs(delta), expense.currency)}
-                  </Text>
+                <View style={{ alignItems: 'flex-end', marginLeft: spacing.sm }}>
+                  {entry.isPayback ? (
+                    <Text style={[font.small, { color: c.settled }]}>settled</Text>
+                  ) : entry.delta === 0 ? (
+                    <Text style={[font.small, { color: c.textFaint }]}>—</Text>
+                  ) : (
+                    // Colour carries the direction here, as it does everywhere
+                    // else in the app; the detail screen spells it out in words.
+                    <Text style={[font.bodyStrong, { color: balanceColor(entry.delta, c) }]}>
+                      {entry.delta > 0 ? '+' : '−'}
+                      {formatMoney(Math.abs(entry.delta), expense.currency)}
+                    </Text>
+                  )}
                 </View>
               </View>
             </Pressable>
@@ -318,37 +324,31 @@ const makeStyles = (c: Palette) =>
   StyleSheet.create({
     hero: {
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.lg,
-      paddingBottom: spacing.sm,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.md,
+      backgroundColor: c.surface,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: c.border,
     },
     actions: {
       flexDirection: 'row',
       gap: spacing.xs,
-      marginTop: spacing.lg,
+      marginTop: spacing.md,
     },
-    hint: {
-      ...font.small,
-      color: c.textFaint,
+    dateHeader: {
       paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.sm,
-    },
-    memberToggle: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: spacing.lg,
-      paddingVertical: spacing.md,
-      marginTop: spacing.sm,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.xs,
+      backgroundColor: c.bg,
     },
     listHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: spacing.lg,
-      paddingTop: spacing.lg,
+      paddingTop: spacing.md,
       paddingBottom: spacing.sm,
+      backgroundColor: c.bg,
     },
     expenseRow: {
       flexDirection: 'row',

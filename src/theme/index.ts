@@ -1,4 +1,4 @@
-import { useColorScheme } from 'react-native';
+import { useColorScheme, type TextStyle } from 'react-native';
 
 import { useSettings } from '../store/useSettings';
 
@@ -73,57 +73,62 @@ export interface Palette {
 
 export const lightColors: Palette = {
   owed: '#1CC29F',
-  owedTint: '#E7F8F4',
+  owedTint: '#E4F7F2',
   owe: '#FF652F',
-  oweTint: '#FFEDE6',
+  oweTint: '#FFEDE5',
 
-  bg: '#FFFFFF',
-  surface: '#F7F7F7',
+  // The canvas is a soft neutral rather than white, so white cards lift off it
+  // on their own. That is what lets the app drop most of its divider lines and
+  // still read as separate blocks.
+  bg: '#F6F7F9',
+  surface: '#EFF1F4',
   card: '#FFFFFF',
-  border: '#E6E6E6',
+  border: '#E4E7EB',
 
-  text: '#1B1B1B',
-  textMuted: '#6B6B6B',
-  textFaint: '#9B9B9B',
+  text: '#15171A',
+  textMuted: '#5F6570',
+  textFaint: '#9AA1AC',
   onDark: '#FFFFFF',
 
   header: '#FFFFFF',
-  settled: '#8A8A8A',
-  danger: '#D93025',
+  settled: '#8A9099',
+  danger: '#D93B30',
 
   chartPos: '#00A07E',
   chartNeg: '#E34B06',
-  chartTrack: '#EFEFEF',
-  pressed: '#E4E4E4',
+  chartTrack: '#E8EBEF',
+  pressed: '#E8EBEF',
   chartRamp: ['#006143', '#006E50', '#007C5C', '#008969', '#009776', '#13A583', '#2FB491', '#42C29E'],
 };
 
 export const darkColors: Palette = {
-  // Lifted toward white so they hold contrast on #121212.
+  // Lifted toward white so they hold contrast on a near-black surface.
   owed: '#2EDCB4',
-  owedTint: '#12312B',
+  owedTint: '#10312A',
   owe: '#FF8354',
   oweTint: '#3A2118',
 
-  bg: '#121212',
+  // Very slightly cool rather than neutral grey: pure greys next to the teal
+  // read as dirty, and the cast is what stops the dark theme looking flat.
+  bg: '#0E0F12',
   // Elevated surfaces get lighter, not darker - the Material dark convention.
-  surface: '#1E1E1E',
-  card: '#1A1A1A',
-  border: '#2C2C2C',
+  surface: '#1F2228',
+  card: '#17191D',
+  border: '#282C33',
 
-  text: '#ECECEC',
-  textMuted: '#A0A0A0',
-  textFaint: '#6E6E6E',
+  text: '#EDEFF2',
+  textMuted: '#9BA2AD',
+  textFaint: '#6B727D',
   onDark: '#0A0A0A',
 
-  header: '#121212',
-  settled: '#7A7A7A',
+  header: '#0E0F12',
+  settled: '#7A818B',
   danger: '#FF6B5E',
 
   chartPos: '#00AE88',
   chartNeg: '#E2693A',
-  chartTrack: '#262626',
-  pressed: '#333333',
+  chartTrack: '#24272E',
+  pressed: '#2A2E36',
   chartRamp: ['#50D9B1', '#3DCAA3', '#27BC95', '#00AD87', '#009F7A', '#00916D', '#008360', '#007553'],
 };
 
@@ -154,18 +159,48 @@ export const avatarColors = [
   '#F2C94C',
 ];
 
-export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
+export const spacing = { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 
-export const radius = { sm: 6, md: 10, lg: 16, pill: 999 };
+export const radius = { sm: 8, md: 12, lg: 18, xl: 26, pill: 999 };
 
 export const font = {
-  h1: { fontSize: 28, fontWeight: '700' as const },
-  h2: { fontSize: 20, fontWeight: '700' as const },
-  h3: { fontSize: 17, fontWeight: '600' as const },
+  // Negative tracking on the large sizes only. Headlines set at default
+  // spacing look loose at 22px and above; body text does not.
+  h1: { fontSize: 32, fontWeight: '700' as const, letterSpacing: -0.6 },
+  h2: { fontSize: 22, fontWeight: '700' as const, letterSpacing: -0.3 },
+  h3: { fontSize: 17, fontWeight: '600' as const, letterSpacing: -0.2 },
   body: { fontSize: 15, fontWeight: '400' as const },
   bodyStrong: { fontSize: 15, fontWeight: '600' as const },
   small: { fontSize: 13, fontWeight: '400' as const },
   tiny: { fontSize: 11, fontWeight: '600' as const },
+  /**
+   * Figures. Tabular digits are all one width, so a column of amounts lines up
+   * on the decimal instead of shuffling as the numbers change.
+   */
+  numeric: { fontVariant: ['tabular-nums'] as TextStyle['fontVariant'] },
+};
+
+/**
+ * Elevation.
+ *
+ * Two levels only: things resting on the canvas, and things floating over it.
+ * More than that and the hierarchy stops being readable at a glance.
+ */
+export const shadow = {
+  card: {
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  floating: {
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
 };
 
 /** Colour for a signed balance: teal when owed, orange when owing. */
@@ -185,6 +220,7 @@ export const categoryIcon: Record<string, string> = {
   entertainment: 'film-outline',
   travel: 'airplane-outline',
   shopping: 'bag-outline',
+  sports: 'football-outline',
   settlement: 'swap-horizontal-outline',
 };
 

@@ -43,7 +43,17 @@ export default function NewGroupScreen() {
       // an id the invite endpoint recognises.
       const { group } = await api.createGroup(name.trim(), type, 'INR');
       await refresh();
-      router.replace(`/group/${group.id}`);
+      // Hand back a shareable link straight away. A new group exists in order
+      // to have people in it, and leaving the invite a screen away meant most
+      // groups never got shared at all.
+      try {
+        const { code } = await api.createInvite(group.id);
+        router.replace(`/group/invite?groupId=${group.id}&code=${code}&created=1`);
+      } catch {
+        // The group is real even if minting the code failed; the invite screen
+        // retries on its own when it opens.
+        router.replace(`/group/invite?groupId=${group.id}&created=1`);
+      }
     } catch (err) {
       // Offline: fall back to a local group so the app still works.
       const local = addGroup(name, type, selected);

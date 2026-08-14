@@ -7,9 +7,26 @@
  * Conversion back to a decimal string happens only at the display layer.
  */
 
-export type SplitMethod = 'equal' | 'exact' | 'percent' | 'shares';
+/**
+ * `adjust` and `reduce` are the two halves of equal-with-an-exception:
+ * everyone splits evenly except that named people carry an extra amount on top
+ * (`adjust`) or come off it (`reduce`). One person's round of drinks on a
+ * shared dinner bill; one person who skipped dessert.
+ */
+export type SplitMethod =
+  | 'equal'
+  | 'exact'
+  | 'percent'
+  | 'shares'
+  | 'adjust'
+  | 'reduce';
 
-export type GroupType = 'trip' | 'home' | 'couple' | 'other';
+/**
+ * 'personal' is the odd one out: a private, single-member group holding spends
+ * that are nobody's but yours. It is a group only so that storage, sync and
+ * balance math need no special case — the UI never lists it as one.
+ */
+export type GroupType = 'trip' | 'home' | 'couple' | 'other' | 'personal';
 
 export interface Person {
   id: string;
@@ -60,6 +77,41 @@ export interface Expense {
    * code path instead of two that can disagree.
    */
   isSettlement: boolean;
+}
+
+/**
+ * One field that changed in an edit.
+ *
+ * `from` and `to` arrive already rendered by the server, resolved against the
+ * names and formatting in force when the edit was made — so the history still
+ * reads correctly after someone renames themselves or leaves the group.
+ */
+export interface ExpenseChange {
+  field: string;
+  from: string;
+  to: string;
+}
+
+export type ActivityAction = 'created' | 'edited' | 'deleted' | 'settled' | 'joined';
+
+/**
+ * One entry in the permanent trail: who did what to a group's money, and when.
+ *
+ * Append-only by design. Nothing in the app deletes or rewrites these, and a
+ * deleted expense keeps its entries — that is the whole point of having them.
+ */
+export interface ActivityEntry {
+  id: string;
+  groupId: string;
+  /** Absent for group-level events such as someone joining. */
+  expenseId?: string;
+  actorId: string;
+  action: ActivityAction;
+  at: string;
+  /** Rendered when the event happened, so it survives the expense's deletion. */
+  summary: string;
+  /** Populated for edits only. */
+  changes: ExpenseChange[];
 }
 
 /** Net position. Positive means this person is owed money. */

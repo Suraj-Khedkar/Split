@@ -8,7 +8,7 @@
  *
  * API calls are never cached — stale balances would be worse than an error.
  */
-const CACHE = 'splitwise-shell-v1';
+const CACHE = 'split-and-track-shell-v1';
 const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
@@ -23,6 +23,55 @@ self.addEventListener('activate', (event) => {
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+  );
+});
+
+/**
+ * A new expense somewhere you are involved.
+ *
+ * The payload is already decrypted by the browser by the time it reaches here.
+ * userVisibleOnly was a condition of the subscription, so every push must show
+ * something — a push that resolves without calling showNotification counts
+ * against the origin and eventually gets the permission revoked. Hence the
+ * fallback text on a malformed body.
+ */
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    // Fall through to the generic message rather than showing nothing.
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Split & Track', {
+      body: data.body || 'Something changed in one of your groups.',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      // Same tag replaces an earlier notification for the same expense instead
+      // of stacking duplicates when several devices report it.
+      tag: data.tag || 'split-and-track',
+      data: { url: data.url || '/' },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = event.notification.data?.url || '/';
+
+  // Focus a tab that is already open rather than opening a second copy of the
+  // app; in a standalone PWA a second window is especially jarring.
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      for (const client of windows) {
+        if ('focus' in client) {
+          if ('navigate' in client) client.navigate(target).catch(() => {});
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    })
   );
 });
 

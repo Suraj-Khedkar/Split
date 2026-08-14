@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Splitwise Clone",
+    "name": "Split & Track",
     "slug": "splitwise-clone",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -40,8 +40,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Splitwise Clone uses your photos so you can pick a receipt to scan.",
-          "cameraPermission": "Splitwise Clone uses the camera so you can photograph a receipt."
+          "photosPermission": "Split & Track uses your photos so you can pick a receipt to scan.",
+          "cameraPermission": "Split & Track uses the camera so you can photograph a receipt."
         }
       ],
       "expo-font",
@@ -51,11 +51,11 @@
     "splash": {
       "image": "./assets/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF",
+      "backgroundColor": "#F6F7F9",
       "dark": {
         "image": "./assets/icon.png",
         "resizeMode": "contain",
-        "backgroundColor": "#121212"
+        "backgroundColor": "#0E0F12"
       }
     },
     "extra": {
