@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "527600628367",
+    "project_id": "split-and-track-588f6",
+    "storage_bucket": "split-and-track-588f6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:527600628367:android:5eae9eef5a999ef59b76fa",
+        "android_client_info": {
+          "package_name": "com.suraj.splitandtrack"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCl1UEm3wwyiPLxrd1bEHs8pdRiLjdgttI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+

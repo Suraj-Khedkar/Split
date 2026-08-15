@@ -46,6 +46,11 @@ after_signup.png
 dark_mode.png
 android/
 ios/
-google-services.json
+# google-services.json is deliberately NOT ignored: EAS only uploads
+# git-tracked files, so ignoring it fails the Android build outright. It is
+# not a secret either — Google documents it as safe to commit, and it ships
+# inside every APK, which is already public on the releases page. The API
+# key inside it is restricted to this package name and signing certificate.
+# The service-account key below IS a secret and stays ignored.
 *service-account*.json
 *-firebase-adminsdk-*.json
