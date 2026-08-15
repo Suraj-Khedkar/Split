@@ -84,10 +84,16 @@ export function useGoogleSignIn(onCode: (result: GoogleCodeResult) => void) {
   //
   // Read from the config rather than written out, so renaming the package
   // cannot silently desynchronise the two again.
-  const redirectUri = AuthSession.makeRedirectUri({
-    scheme: Platform.OS === 'web' ? undefined : androidPackage(),
-    path: 'oauthredirect',
-  });
+  //
+  // Built by hand on native rather than with makeRedirectUri, which emits
+  // `scheme://path`. Google documents the custom-scheme form with a SINGLE
+  // slash — `com.example.app:/oauth2redirect` — and AppAuth uses the same, so
+  // the authority-style `://` was being refused with a bare invalid_request
+  // naming the URI back at us.
+  const redirectUri =
+    Platform.OS === 'web'
+      ? AuthSession.makeRedirectUri({ path: 'oauthredirect' })
+      : `${androidPackage()}:/oauthredirect`;
 
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {
