@@ -52,6 +52,16 @@ export function googleClientIdForPlatform(): string {
   return ANDROID_CLIENT_ID;
 }
 
+/**
+ * The Android application id, which doubles as the only custom URI scheme
+ * Google will accept for this client.
+ */
+function androidPackage(): string {
+  const fromConfig = (Constants.expoConfig as { android?: { package?: string } } | null)?.android
+    ?.package;
+  return fromConfig ?? 'com.suraj.splitandtrack';
+}
+
 export interface GoogleCodeResult {
   code: string;
   codeVerifier: string;
@@ -64,10 +74,18 @@ export function useGoogleSignIn(onCode: (result: GoogleCodeResult) => void) {
   const clientId = googleClientIdForPlatform();
 
   // On web this resolves to <origin>/oauthredirect, which the static server
-  // answers with index.html via its SPA fallback; on native it is
-  // splitandtrack://oauthredirect.
+  // answers with index.html via its SPA fallback.
+  //
+  // On Android it has to be the PACKAGE NAME as the scheme, not the app's own
+  // `splitandtrack://`. Google validates a custom redirect against the Android
+  // client's package name and accepts no other scheme; an invented one is
+  // refused with "this app doesn't comply with Google's OAuth 2.0 policy",
+  // which reads like an app-wide ban but is really just this mismatch.
+  //
+  // Read from the config rather than written out, so renaming the package
+  // cannot silently desynchronise the two again.
   const redirectUri = AuthSession.makeRedirectUri({
-    scheme: 'splitandtrack',
+    scheme: Platform.OS === 'web' ? undefined : androidPackage(),
     path: 'oauthredirect',
   });
 

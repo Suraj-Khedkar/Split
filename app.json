@@ -56,7 +56,10 @@
         }
       ]
     ],
-    "scheme": "splitandtrack",
+    "scheme": [
+      "splitandtrack",
+      "com.suraj.splitandtrack"
+    ],
     "splash": {
       "image": "./assets/icon.png",
       "resizeMode": "contain",
