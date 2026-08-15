@@ -324,6 +324,19 @@ export const api = {
       body: JSON.stringify(subscription),
     }),
 
+  /** Expo push token for the Android build. */
+  registerNativePush: (token: string) =>
+    request<{}>('/push/native/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
+  unregisterNativePush: (token: string) =>
+    request<{}>('/push/native/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
   pushUnsubscribe: (endpoint: string) =>
     request<{}>('/push/unsubscribe', {
       method: 'POST',

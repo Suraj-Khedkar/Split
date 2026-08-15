@@ -8,7 +8,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.suraj.splitwiseclone",
+      "bundleIdentifier": "com.suraj.splitandtrack",
       "userInterfaceStyle": "automatic",
       "buildNumber": "1"
     },
@@ -19,14 +19,16 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.suraj.splitwiseclone",
+      "package": "com.suraj.splitandtrack",
       "userInterfaceStyle": "automatic",
       "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
-      ]
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -45,9 +47,16 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#1CC29F"
+        }
+      ]
     ],
-    "scheme": "splitwiseclone",
+    "scheme": "splitandtrack",
     "splash": {
       "image": "./assets/icon.png",
       "resizeMode": "contain",
@@ -61,7 +70,7 @@
     "extra": {
       "router": {},
       "googleClientId": "563634096833-2v4hhc5tjf46ojvih9nehr7n0s04vqh5.apps.googleusercontent.com",
-      "googleAndroidClientId": "",
+      "googleAndroidClientId": "563634096833-8r4k6g4a3oci2mmo3346jooq0753kuju.apps.googleusercontent.com",
       "eas": {
         "projectId": "1a265b3c-e92b-4523-bdbf-f0a981b88a2f"
       }

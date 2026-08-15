@@ -1,8 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import { newId } from './id';
+import { readStored, writeStored } from './storage';
 
-const KEY = 'splitwise-clone/device';
+const KEY = 'device';
 
 /**
  * Stable id for this install (this browser, or this phone's app).
@@ -21,7 +20,7 @@ export function deviceId(): string {
 export async function loadDeviceId(): Promise<string> {
   if (cached) return cached;
   try {
-    const saved = await AsyncStorage.getItem(KEY);
+    const saved = await readStored(KEY);
     if (saved) {
       cached = saved;
       return cached;
@@ -32,7 +31,7 @@ export async function loadDeviceId(): Promise<string> {
   }
   cached = newId('dev');
   try {
-    await AsyncStorage.setItem(KEY, cached);
+    await writeStored(KEY, cached);
   } catch {
     /* non-fatal */
   }

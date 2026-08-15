@@ -1,7 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 import { api } from './api';
+import { readStored, writeStored } from './storage';
 
 /**
  * Web Push subscription management.
@@ -103,7 +103,7 @@ export async function enablePush(): Promise<PushState> {
   return 'on';
 }
 
-const AUTO_KEY = 'splitwise-clone/push-auto-attempted';
+const AUTO_KEY = 'push-auto-attempted';
 
 /**
  * Bring notifications up on their own, as soon as there is a session.
@@ -134,8 +134,8 @@ export async function autoEnablePush(): Promise<PushState> {
   }
 
   try {
-    if (await AsyncStorage.getItem(AUTO_KEY)) return 'off';
-    await AsyncStorage.setItem(AUTO_KEY, '1');
+    if (await readStored(AUTO_KEY)) return 'off';
+    await writeStored(AUTO_KEY, '1');
     return await enablePush();
   } catch {
     return 'off';

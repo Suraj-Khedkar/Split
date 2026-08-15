@@ -1686,6 +1686,35 @@ const routes = {
     send(res, 201, { ok: true });
   },
 
+  /** Register an Expo push token for this device (the Android app). */
+  'POST /api/push/native/subscribe': async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const body = await readJson(req);
+    const token = String(body.token ?? '').trim();
+    if (!token.startsWith('ExponentPushToken') && !token.startsWith('ExpoPushToken')) {
+      return fail(res, 400, 'That does not look like an Expo push token');
+    }
+    // OR REPLACE so reinstalling, or the same token arriving from a device
+    // whose id changed, updates the row rather than colliding on the key.
+    db.prepare(
+      'INSERT OR REPLACE INTO expo_push_tokens (token, user_id, device_id, created_at) VALUES (?, ?, ?, ?)'
+    ).run(token, user.id, deviceOf(req), now());
+    send(res, 200, { ok: true });
+  },
+
+  'POST /api/push/native/unsubscribe': async (req, res) => {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const body = await readJson(req);
+    // Scoped to the caller so one account cannot unregister another's device.
+    db.prepare('DELETE FROM expo_push_tokens WHERE token = ? AND user_id = ?').run(
+      String(body.token ?? ''),
+      user.id
+    );
+    send(res, 200, { ok: true });
+  },
+
   'POST /api/push/unsubscribe': async (req, res) => {
     const user = requireUser(req, res);
     if (!user) return;
@@ -1794,6 +1823,51 @@ function broadcast(groupId, exceptDeviceId) {
  * Fire-and-forget. A push service being slow or down must never delay, or
  * fail, the request that created the expense.
  */
+/**
+ * Deliver to Android through Expo's push service.
+ *
+ * Expo relays to FCM on our behalf, which is why this server needs no Firebase
+ * service-account key and no google-services.json — the FCM credentials live
+ * in the EAS project instead. The cost is one more hop; the benefit is that
+ * this file stays a plain fetch with no Google SDK behind it.
+ *
+ * Only the title, body and a group id ever leave the machine. No amounts of
+ * anyone's ledger beyond what the notification itself says.
+ */
+async function sendExpoPush(tokens, payload) {
+  if (!tokens.length) return;
+  const messages = tokens.map((t) => ({
+    to: t,
+    title: payload.title,
+    body: payload.body,
+    data: { url: payload.url },
+    // Collapse repeats about the same expense rather than stacking them.
+    collapseId: payload.tag,
+    channelId: 'default',
+    priority: 'high',
+  }));
+
+  try {
+    const resp = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      // Expo accepts up to 100 messages per call; this app will never be near it.
+      body: JSON.stringify(messages),
+    });
+    const body = await resp.json().catch(() => null);
+    const results = body?.data ?? [];
+    results.forEach((r, i) => {
+      // A token is dead once the app is uninstalled or the install is replaced.
+      // Expo says so explicitly, and keeping it would mean failing forever.
+      if (r?.status === 'error' && r?.details?.error === 'DeviceNotRegistered') {
+        db.prepare('DELETE FROM expo_push_tokens WHERE token = ?').run(tokens[i]);
+      }
+    });
+  } catch (err) {
+    console.error('expo push failed:', err?.message ?? err);
+  }
+}
+
 function notifyNewExpense(groupId, actingDeviceId, expense, actorName) {
   const group = db.prepare('SELECT name, type, currency FROM groups WHERE id = ?').get(groupId);
   // Your own solo spending is not news to you, and it is the one ledger
@@ -1811,7 +1885,14 @@ function notifyNewExpense(groupId, actingDeviceId, expense, actorName) {
     .prepare(`SELECT * FROM push_subscriptions WHERE user_id IN (${placeholders})`)
     .all(...members)
     .filter((s) => !actingDeviceId || s.device_id !== actingDeviceId);
-  if (!subs.length) return;
+  const expoTokens = db
+    .prepare(`SELECT * FROM expo_push_tokens WHERE user_id IN (${placeholders})`)
+    .all(...members)
+    .filter((t) => !actingDeviceId || t.device_id !== actingDeviceId)
+    .map((t) => t.token);
+  // Someone may have the PWA on one device and the APK on another, so both
+  // lists are consulted; either being empty is normal.
+  if (!subs.length && !expoTokens.length) return;
 
   const money = `${group.currency === 'INR' ? '₹' : ''}${(expense.amount / 100).toFixed(2)}`;
   const payload = expense.is_settlement
@@ -1837,6 +1918,7 @@ function notifyNewExpense(groupId, actingDeviceId, expense, actorName) {
         db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(sub.endpoint);
       }
     }
+    await sendExpoPush(expoTokens, payload);
   })();
 }
 

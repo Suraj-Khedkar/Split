@@ -6,7 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { loadDeviceId } from '../src/lib/device';
 import { readPendingInvite } from '../src/lib/invite';
-import { autoEnablePush } from '../src/lib/push';
+import { enableNotifications } from '../src/lib/notifications';
 import { useAuth } from '../src/store/useAuth';
 import { useAutoSync } from '../src/store/useAutoSync';
 import { useSettings } from '../src/store/useSettings';
@@ -79,7 +79,7 @@ export default function RootLayout() {
   // run earlier: registering the subscription is an authenticated call.
   useEffect(() => {
     if (authStatus !== 'signedIn') return;
-    void autoEnablePush();
+    void enableNotifications();
   }, [authStatus]);
 
   // Route guard. Without this the app dropped straight into the tabs, so a

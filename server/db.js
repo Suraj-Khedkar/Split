@@ -182,6 +182,22 @@ export function openDb(path) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+
+    -- Native (Android) push, kept apart from the Web Push table above rather
+    -- than sharing it. The two have nothing in common: a Web Push subscription
+    -- is an endpoint URL plus two encryption keys that this server encrypts
+    -- for itself, while this is an opaque Expo token that Expo delivers on our
+    -- behalf. Forcing them into one table would mean half the columns are null
+    -- in every row and every read has to branch on which kind it is.
+    CREATE TABLE IF NOT EXISTS expo_push_tokens (
+      token      TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      -- Matches X-Device-Id, so the device that made a change can be skipped
+      -- exactly as the WebSocket broadcast and Web Push already do.
+      device_id  TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_expo_push_user ON expo_push_tokens(user_id);
   `);
 
   // --- migrations -------------------------------------------------------

@@ -1,11 +1,11 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 import { api, ApiError, setAuthToken, type ApiUser } from '../lib/api';
+import { readStored, removeStored, writeStored } from '../lib/storage';
 import type { GoogleCodeResult } from '../lib/googleAuth';
 import { useStore } from './useStore';
 
-const TOKEN_KEY = 'splitwise-clone/token';
+const TOKEN = 'token';
 
 type Status = 'loading' | 'signedOut' | 'signedIn';
 
@@ -42,7 +42,7 @@ interface AuthStore {
 
 async function adopt(token: string, user: ApiUser) {
   setAuthToken(token);
-  await AsyncStorage.setItem(TOKEN_KEY, token);
+  await writeStored(TOKEN, token);
   useStore.getState().setIdentity(user.id);
 }
 
@@ -73,7 +73,7 @@ export const useAuth = create<AuthStore>((set, get) => ({
   hasPassword: false,
 
   restore: async () => {
-    const token = await AsyncStorage.getItem(TOKEN_KEY);
+    const token = await readStored(TOKEN);
     if (!token) {
       set({ status: 'signedOut' });
       return;
@@ -91,7 +91,7 @@ export const useAuth = create<AuthStore>((set, get) => ({
       if (err instanceof ApiError && /reach the server/i.test(err.message)) {
         set({ status: 'signedIn', offline: true });
       } else {
-        await AsyncStorage.removeItem(TOKEN_KEY);
+        await removeStored(TOKEN);
         setAuthToken(null);
         set({ status: 'signedOut', user: null, token: null });
       }
@@ -168,7 +168,7 @@ export const useAuth = create<AuthStore>((set, get) => ({
     } catch {
       // Local sign-out must succeed even when the server cannot be reached.
     }
-    await AsyncStorage.removeItem(TOKEN_KEY);
+    await removeStored(TOKEN);
     setAuthToken(null);
     useStore.getState().clearAll();
     set({

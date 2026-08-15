@@ -1,18 +1,17 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import { API_BASE } from './api';
+import { readStored, removeStored, writeStored } from './storage';
 
 /**
  * Survives the sign-up detour. Storage rather than in-memory state because on
  * web the invite link is usually opened in a fresh tab, and signing up can
  * bounce through Google in between — both of which lose module state.
  */
-const PENDING_KEY = 'splitwise-clone/pending-invite';
+const PENDING_KEY = 'pending-invite';
 
 /**
  * Public https link that carries an invite code.
  *
- * Deliberately not `Linking.createURL()`: that yields `splitwiseclone://…` on
+ * Deliberately not `Linking.createURL()`: that yields `splitandtrack://…` on
  * native, which only resolves for people who already installed the app — the
  * exact people who do not need an invite. An https link opens the web app in
  * any browser (and the installed PWA where the OS routes it there).
@@ -26,13 +25,13 @@ export function inviteLink(code: string): string {
 }
 
 export async function setPendingInvite(code: string): Promise<void> {
-  await AsyncStorage.setItem(PENDING_KEY, code);
+  await writeStored(PENDING_KEY, code);
 }
 
 export async function readPendingInvite(): Promise<string | null> {
-  return AsyncStorage.getItem(PENDING_KEY);
+  return readStored(PENDING_KEY);
 }
 
 export async function clearPendingInvite(): Promise<void> {
-  await AsyncStorage.removeItem(PENDING_KEY);
+  await removeStored(PENDING_KEY);
 }

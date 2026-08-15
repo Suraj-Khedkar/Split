@@ -65,9 +65,9 @@ export function useGoogleSignIn(onCode: (result: GoogleCodeResult) => void) {
 
   // On web this resolves to <origin>/oauthredirect, which the static server
   // answers with index.html via its SPA fallback; on native it is
-  // splitwiseclone://oauthredirect.
+  // splitandtrack://oauthredirect.
   const redirectUri = AuthSession.makeRedirectUri({
-    scheme: 'splitwiseclone',
+    scheme: 'splitandtrack',
     path: 'oauthredirect',
   });
 

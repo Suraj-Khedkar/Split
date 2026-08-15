@@ -1,8 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 import { api } from '../lib/api';
 import { newId } from '../lib/id';
+import { readStored, writeStored } from '../lib/storage';
 import { buildSplits, singlePayer } from '../lib/split';
 import type {
   ActivityEntry,
@@ -14,7 +14,7 @@ import type {
   SplitShare,
 } from '../types';
 
-const STORAGE_KEY = 'splitwise-clone/v1';
+const STORAGE_KEY = 'v1';
 
 interface Data {
   /** The device owner. Every "you owe / you are owed" view is relative to this. */
@@ -160,7 +160,7 @@ async function pushExpense(expense: Expense) {
 
 async function persist(data: Data) {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    await writeStored(STORAGE_KEY, JSON.stringify(data));
   } catch {
     // A failed write must not take the UI down; the in-memory state is still
     // correct and the next mutation retries.
@@ -183,7 +183,7 @@ export const useStore = create<Store>((set, get) => {
 
     hydrate: async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        const raw = await readStored(STORAGE_KEY);
         if (raw) {
           const saved = JSON.parse(raw) as Data;
           if (saved?.people?.length) {

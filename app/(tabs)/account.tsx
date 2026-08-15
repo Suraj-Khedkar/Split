@@ -5,7 +5,13 @@ import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from 're
 
 import { Avatar, Button, ConfirmDialog, Divider, Row, SectionTitle } from '../../src/components/ui';
 import { useGoogleSignIn } from '../../src/lib/googleAuth';
-import { disablePush, enablePush, pushState, type PushState } from '../../src/lib/push';
+import {
+  disableNotifications,
+  enableNotifications,
+  notificationState,
+  notificationsSupported,
+  type NotificationState,
+} from '../../src/lib/notifications';
 import { usePersonalExpenses, useOverallBalance, useSharedGroups } from '../../src/store/selectors';
 import { useAuth } from '../../src/store/useAuth';
 import { useSettings, type ThemeMode } from '../../src/store/useSettings';
@@ -39,7 +45,7 @@ export default function AccountScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncedAt, setSyncedAt] = useState('');
 
-  const [notifications, setNotifications] = useState<PushState>('unsupported');
+  const [notifications, setNotifications] = useState<NotificationState>('unsupported');
   const [notifyBusy, setNotifyBusy] = useState(false);
   const [notifyError, setNotifyError] = useState('');
 
@@ -83,17 +89,17 @@ export default function AccountScreen() {
   // both outlive the app, so trusting a remembered flag would show a switch
   // that disagrees with what the browser is actually doing.
   useEffect(() => {
-    void pushState().then(setNotifications);
+    void notificationState().then(setNotifications);
   }, []);
 
   const toggleNotifications = async (next: boolean) => {
     setNotifyBusy(true);
     setNotifyError('');
     try {
-      setNotifications(next ? await enablePush() : await disablePush());
+      setNotifications(next ? await enableNotifications() : await disableNotifications());
     } catch (err) {
       setNotifyError(err instanceof Error ? err.message : 'Could not change that');
-      setNotifications(await pushState());
+      setNotifications(await notificationState());
     } finally {
       setNotifyBusy(false);
     }
@@ -101,9 +107,9 @@ export default function AccountScreen() {
 
   const notifySubtitle =
     notifications === 'unsupported'
-      ? 'Web app only'
+      ? 'Not available on this device'
       : notifications === 'denied'
-      ? 'Blocked in your browser settings'
+      ? 'Blocked in your system settings'
       : notifications === 'on'
       ? 'On'
       : 'When someone adds an expense';
@@ -239,6 +245,13 @@ export default function AccountScreen() {
         })}
       </View>
 
+      {/* Only where Web Push exists. The native build has no service worker
+          and no PushManager, so this control could never do anything there —
+          showing a permanently disabled switch just invited the question of
+          why it does not work. Android alerts need FCM, which is a different
+          mechanism entirely and is not wired up yet. */}
+      {notificationsSupported() ? (
+        <>
       <SectionTitle>Notifications</SectionTitle>
       <Row
         left={
@@ -267,6 +280,8 @@ export default function AccountScreen() {
         <Text style={[font.small, { color: c.danger, paddingHorizontal: spacing.lg }]}>
           {notifyError}
         </Text>
+      ) : null}
+        </>
       ) : null}
 
       <SectionTitle>Your data</SectionTitle>

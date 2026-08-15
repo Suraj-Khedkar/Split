@@ -46,3 +46,6 @@ after_signup.png
 dark_mode.png
 android/
 ios/
+google-services.json
+*service-account*.json
+*-firebase-adminsdk-*.json

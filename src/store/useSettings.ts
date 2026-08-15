@@ -1,11 +1,11 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 import { learningKey } from '../lib/categorise';
+import { readStored, writeStored } from '../lib/storage';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 
-const KEY = 'splitwise-clone/settings';
+const KEY = 'settings';
 
 interface Settings {
   /** Dark by default — the app is mostly used in the evening, settling up
@@ -56,7 +56,7 @@ export const useSettings = create<Settings>((set, get) => ({
 
   load: async () => {
     try {
-      const raw = await AsyncStorage.getItem(KEY);
+      const raw = await readStored(KEY);
       if (raw) {
         const saved = JSON.parse(raw) as Partial<Settings>;
         if (saved.themeMode) set({ themeMode: saved.themeMode });
@@ -108,7 +108,7 @@ export const useSettings = create<Settings>((set, get) => ({
 }));
 
 function persist(state: Settings) {
-  void AsyncStorage.setItem(
+  void writeStored(
     KEY,
     JSON.stringify({
       themeMode: state.themeMode,
