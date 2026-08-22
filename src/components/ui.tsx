@@ -271,6 +271,56 @@ export function Divider() {
   return <View style={[styles.divider, { backgroundColor: c.border }]} />;
 }
 
+/**
+ * "Working offline — N changes waiting to sync."
+ *
+ * Renders nothing when there is nothing to say, so screens can mount it
+ * unconditionally. Being offline is only worth a line once something is
+ * actually unsent — before that the app is fully usable from its local copy
+ * and a warning would just be noise.
+ */
+export function SyncBanner({ offline, pending }: { offline: boolean; pending: number }) {
+  const c = useColors();
+  if (pending === 0 && !offline) return null;
+
+  const changes = `${pending} ${pending === 1 ? 'change' : 'changes'}`;
+  const text =
+    pending === 0
+      ? 'Offline — showing the last synced copy'
+      : offline
+      ? `Offline — ${changes} will sync when you reconnect`
+      : `Syncing ${changes}…`;
+
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginHorizontal: spacing.lg,
+        marginTop: spacing.md,
+        padding: spacing.md,
+        borderRadius: radius.md,
+        backgroundColor: pending > 0 ? c.oweTint : c.surface,
+      }}
+      accessibilityRole="alert"
+    >
+      <Ionicons
+        name={offline ? 'cloud-offline-outline' : 'cloud-upload-outline'}
+        size={18}
+        color={pending > 0 ? c.owe : c.textMuted}
+      />
+      <Text
+        style={[
+          font.small,
+          { color: pending > 0 ? c.owe : c.textMuted, marginLeft: spacing.sm, flex: 1 },
+        ]}
+      >
+        {text}
+      </Text>
+    </View>
+  );
+}
+
 /** Floating action button, Splitwise's "Add expense" affordance. */
 export function Fab({
   onPress,

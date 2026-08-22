@@ -1,7 +1,9 @@
+import { useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 
-import { api } from '../lib/api';
+import { api, isRetryable } from '../lib/api';
 import { newId } from '../lib/id';
+import { createOutbox, type FlushResult, type QueuedExpense } from '../lib/outbox';
 import { readStored, writeStored } from '../lib/storage';
 import { buildSplits, singlePayer } from '../lib/split';
 import type {
@@ -108,14 +110,91 @@ function empty(): Data {
 let lastPushError = '';
 export const getLastPushError = () => lastPushError;
 
+const OUTBOX_KEY = 'outbox';
+
 /**
- * Expenses posted but not yet confirmed by a sync.
+ * Changes made here that the server has not accepted yet.
  *
- * Polling replaces local state with the server's, so without this an expense
- * added seconds before a tick would blink out of existence until the push
- * completed. Ids stay here until the server reports them back.
+ * Persisted, so an expense added on a train survives closing the app and is
+ * still sent when the signal comes back. It also tells applyServerSnapshot
+ * which rows to protect: a sync is server-wins, so without this list anything
+ * not yet uploaded would be erased the moment the connection returned.
  */
-const pending = new Set<string>();
+export const outbox = createOutbox({
+  read: () => readStored(OUTBOX_KEY),
+  write: (value) => writeStored(OUTBOX_KEY, value),
+  sender: {
+    createExpense: (expense) => api.createExpense(expense),
+    updateExpense: (expense) => api.updateExpense(expense),
+    deleteExpense: (id) => api.deleteExpense(id),
+  },
+});
+
+/** The server only takes expenses that belong to a group. */
+function queueable(expense: Expense): QueuedExpense | null {
+  if (!expense.groupId) return null;
+  return {
+    id: expense.id,
+    groupId: expense.groupId,
+    description: expense.description,
+    amount: expense.amount,
+    currency: expense.currency,
+    category: expense.category,
+    splitMethod: expense.splitMethod,
+    date: expense.date,
+    notes: expense.notes,
+    isSettlement: expense.isSettlement,
+    paidBy: expense.paidBy,
+    splits: expense.splits,
+  };
+}
+
+/**
+ * Drain whatever is waiting to reach the server.
+ *
+ * Safe to call often — the outbox ignores a flush while one is already
+ * running, and an empty queue costs nothing. Deliberately does not pull
+ * afterwards: the callers that need the server's view already follow this
+ * with one, and doing it here as well meant every sync downloaded the whole
+ * snapshot twice, which is exactly the wrong tax on a weak connection.
+ */
+export async function syncOutbox(): Promise<FlushResult> {
+  const result = await outbox.flush();
+  const { sent, rejected, stuck } = result;
+
+  if (rejected.length > 0) {
+    // Refused, so it will never land however long it waits. Say so plainly
+    // rather than letting the row sit there looking saved.
+    const [first] = rejected;
+    lastPushError =
+      rejected.length === 1
+        ? `A change could not be saved: ${first.error}`
+        : `${rejected.length} changes could not be saved. ${first.error}`;
+  } else if (stuck > 0) {
+    // Still held, so nothing is lost — but it has been failing long enough
+    // that silence would be misleading.
+    lastPushError =
+      stuck === 1
+        ? 'A change is still waiting to reach the server. It will keep retrying.'
+        : `${stuck} changes are still waiting to reach the server. They will keep retrying.`;
+  } else if (sent > 0) {
+    lastPushError = '';
+  }
+
+  return result;
+}
+
+/**
+ * Drain, then pull — for a change this device just made.
+ *
+ * The pull is what picks up the rows only the server can write (the activity
+ * trail), which the live socket deliberately does not echo back to the device
+ * that caused them.
+ */
+async function pushThenPull(): Promise<void> {
+  const { sent } = await syncOutbox();
+  if (sent > 0) await resync();
+}
 
 /**
  * Pull the server's view straight after a mutation this device made.
@@ -139,23 +218,15 @@ async function resync() {
   }
 }
 
-async function pushExpense(expense: Expense) {
-  if (!expense.groupId) {
+function pushExpense(expense: Expense) {
+  const payload = queueable(expense);
+  if (!payload) {
     lastPushError =
       'That settlement is not attached to a group, so it cannot be shared. Settle up from inside a group.';
     return;
   }
-  pending.add(expense.id);
-  try {
-    await api.createExpense({ ...expense, groupId: expense.groupId });
-    lastPushError = '';
-  } catch (err) {
-    lastPushError = err instanceof Error ? err.message : 'Could not save to the server';
-    // Keep it pending: a later sync will not wipe it, and the error is shown.
-    return;
-  }
-  pending.delete(expense.id);
-  await resync();
+  outbox.add({ kind: 'create', expense: payload });
+  void pushThenPull();
 }
 
 async function persist(data: Data) {
@@ -182,6 +253,10 @@ export const useStore = create<Store>((set, get) => {
     hydrated: false,
 
     hydrate: async () => {
+      // Before any snapshot can be applied: applyServerSnapshot reads the
+      // queue to decide what not to erase, and an empty queue means anything
+      // added offline last session looks like a row the server has dropped.
+      await outbox.load();
       try {
         const raw = await readStored(STORAGE_KEY);
         if (raw) {
@@ -270,9 +345,9 @@ export const useStore = create<Store>((set, get) => {
         isSettlement: false,
       };
       commit({ expenses: [expense, ...get().expenses] });
-      // Optimistic: the row is already on screen. A failed push is recorded
-      // and surfaced rather than silently vanishing at the next sync.
-      void pushExpense(expense);
+      // Optimistic: the row is already on screen, and the outbox keeps it
+      // alive until the server has it, however long that takes.
+      pushExpense(expense);
       return expense;
     },
 
@@ -345,25 +420,47 @@ export const useStore = create<Store>((set, get) => {
         return { ok: true, changed: changes.length };
       } catch (err) {
         const error = err instanceof Error ? err.message : 'Could not save the edit';
+
+        // Not reaching the server is not a refusal. Apply the edit locally
+        // and queue it, the same as a new expense — the server just has not
+        // had its say on the rounding yet, and will overwrite this row once
+        // the queue drains. This covers a 502 from the proxy during a
+        // restart as well as a dead connection; only an actual verdict on
+        // the edit (a 4xx) falls through to the error below.
+        if (isRetryable(err)) {
+          const edited: Expense = {
+            ...current,
+            groupId: input.groupId,
+            description: input.description.trim() || 'Expense',
+            amount: input.amount,
+            currency: input.currency ?? current.currency,
+            category: input.category ?? current.category,
+            paidBy,
+            splits,
+            splitMethod: input.splitMethod,
+            date: input.date ?? current.date,
+            notes: input.notes,
+          };
+          commit({ expenses: get().expenses.map((e) => (e.id === id ? edited : e)) });
+
+          const payload = queueable(edited);
+          if (payload) {
+            outbox.add({ kind: 'update', expense: payload });
+            return { ok: true, changed: 1 };
+          }
+        }
+
         lastPushError = error;
         return { ok: false, error, changed: 0 };
       }
     },
 
     deleteExpense: (id) => {
-      pending.delete(id);
       commit({ expenses: get().expenses.filter((e) => e.id !== id) });
-      void (async () => {
-        try {
-          await api.deleteExpense(id);
-        } catch (err) {
-          lastPushError = err instanceof Error ? err.message : 'Could not delete on the server';
-          return;
-        }
-        // The server wrote a "deleted" entry to the trail that only it knows
-        // about, and the socket will not tell this device about its own change.
-        await resync();
-      })();
+      // Queued like any other change, so a delete made offline is not undone
+      // by the next sync finding the row still present on the server.
+      outbox.add({ kind: 'delete', id });
+      void pushThenPull();
     },
 
     settleUp: (fromId, toId, amount, groupId, currency = 'INR') => {
@@ -386,7 +483,7 @@ export const useStore = create<Store>((set, get) => {
       commit({ expenses: [expense, ...get().expenses] });
       // Without this the settlement lived only in local state and the next
       // sync — which is server-authoritative — silently erased it.
-      void pushExpense(expense);
+      pushExpense(expense);
       return expense;
     },
 
@@ -416,8 +513,13 @@ export const useStore = create<Store>((set, get) => {
         currency: g.currency,
         createdAt: g.createdAt,
       }));
+      // Changes this device has made but not yet uploaded. A snapshot is
+      // server-wins, so these are exactly the rows it must not speak for.
+      const queuedIds = outbox.expenseIds();
+      const deletedHere = outbox.deleteIds();
+
       const expenses: Expense[] = snapshot.expenses
-        .filter((e) => !e.deleted)
+        .filter((e) => !e.deleted && !deletedHere.has(e.id))
         .map((e) => ({
           id: e.id,
           groupId: e.groupId,
@@ -435,19 +537,21 @@ export const useStore = create<Store>((set, get) => {
         }))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-      // Carry over anything still in flight so a poll cannot erase a row the
-      // user just created.
+      // Carry over anything still queued so a poll cannot erase a row the user
+      // just created, and keep the local copy of a row whose edit is still
+      // waiting — the server's version is the one being replaced.
       const serverIds = new Set(expenses.map((e) => e.id));
-      const inFlight = get().expenses.filter(
-        (e) => pending.has(e.id) && !serverIds.has(e.id)
+      const local = get().expenses;
+      const stillQueued = local.filter((e) => queuedIds.has(e.id) && !serverIds.has(e.id));
+      const reconciled = expenses.map((e) =>
+        queuedIds.has(e.id) ? local.find((l) => l.id === e.id) ?? e : e
       );
-      for (const e of expenses) pending.delete(e.id);
 
       commit({
         meId: snapshot.user.id,
         people,
         groups,
-        expenses: [...inFlight, ...expenses].sort((a, b) =>
+        expenses: [...stillQueued, ...reconciled].sort((a, b) =>
           b.createdAt.localeCompare(a.createdAt)
         ),
         // The server owns this outright, so it replaces rather than merges.
@@ -463,10 +567,23 @@ export const useStore = create<Store>((set, get) => {
     clearAll: async () => {
       const blank = empty();
       set({ ...blank, hydrated: true });
+      // Or the next account to sign in on this device would inherit the
+      // previous one's unsent expenses and post them as its own.
+      await outbox.clear();
       await persist(blank);
     },
   };
 });
+
+// Module-level so useSyncExternalStore sees the same references every render
+// and does not tear the subscription down and rebuild it each time.
+const subscribeOutbox = (onChange: () => void) => outbox.subscribe(onChange);
+const outboxSize = () => outbox.size();
+
+/** How many changes are still waiting to reach the server. */
+export function usePendingCount(): number {
+  return useSyncExternalStore(subscribeOutbox, outboxSize, outboxSize);
+}
 
 /** Stable lookup used all over the UI. */
 export function personName(people: Person[], id: string, meId: string): string {

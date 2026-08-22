@@ -67,8 +67,12 @@ export default function RootLayout() {
   useEffect(() => {
     // Device id must exist before the socket connects or any mutation goes
     // out, otherwise the server cannot tell this device from the others.
-    void loadDeviceId().then(() => {
-      void hydrate();
+    void loadDeviceId().then(async () => {
+      // Strictly before restore(), which signs in and lets the first /sync
+      // land. hydrate() is what loads the outbox, and a snapshot applied
+      // while that queue still looks empty would erase every change made
+      // offline last session — the exact rows it exists to protect.
+      await hydrate();
       void restore();
     });
     void loadSettings();

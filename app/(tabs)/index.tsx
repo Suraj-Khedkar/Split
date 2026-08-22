@@ -3,12 +3,14 @@ import { Link, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Amount, BalanceLabel, EmptyState, Fab, GroupIcon } from '../../src/components/ui';
+import { Amount, BalanceLabel, EmptyState, Fab, GroupIcon, SyncBanner } from '../../src/components/ui';
 import {
   useGroupBuckets,
   useOverallBalance,
   type GroupRow,
 } from '../../src/store/selectors';
+import { useAuth } from '../../src/store/useAuth';
+import { usePendingCount } from '../../src/store/useStore';
 import { Palette, font, spacing, useColors } from '../../src/theme';
 
 /**
@@ -27,6 +29,8 @@ export default function GroupsScreen() {
   const router = useRouter();
   const { active, settled, dormant } = useGroupBuckets();
   const overall = useOverallBalance();
+  const offline = useAuth((s) => s.offline);
+  const pending = usePendingCount();
   const [showDormant, setShowDormant] = useState(false);
 
   const items: Item[] = [];
@@ -110,6 +114,10 @@ export default function GroupsScreen() {
         data={items}
         keyExtractor={(item) => item.key}
         contentContainerStyle={{ paddingBottom: 120 }}
+        // Above the list rather than in the header block: it comes and goes,
+        // and shifting the balance down every time the signal drops is worse
+        // than the warning is useful.
+        ListHeaderComponent={<SyncBanner offline={offline} pending={pending} />}
         ListEmptyComponent={
           <EmptyState
             icon="people-outline"

@@ -87,18 +87,111 @@ export interface ReceiptItem {
   amount: number;
 }
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  /**
+   * The request never reached the server, so retrying it later may well work.
+   *
+   * A flag rather than something callers have to match on the message: the
+   * outbox decides whether to keep or drop a queued change on exactly this,
+   * and getting it wrong either jams the queue behind a change the server
+   * will never accept, or discards work the user did offline.
+   */
+  readonly offline: boolean;
+
+  /**
+   * "Not now" rather than "no" — the request is still worth repeating.
+   *
+   * Wider than `offline`: a reply that arrived is not the same as a reply that
+   * settles anything. The API sits behind Tailscale Funnel and a local proxy,
+   * either of which answers 502/503 of its own when the API process is
+   * restarting or the machine is asleep. Those look like ordinary refusals at
+   * the fetch layer, and treating them as such is what let a routine API
+   * restart drop a queued expense on the floor.
+   */
+  readonly retryable: boolean;
+
+  /** 0 when the request never got far enough to have one. */
+  readonly status: number;
+
+  constructor(
+    message: string,
+    options: { offline?: boolean; retryable?: boolean; status?: number } = {}
+  ) {
+    super(message);
+    this.offline = options.offline ?? false;
+    this.status = options.status ?? 0;
+    // Never reaching the server is the original retryable case, so it implies
+    // this unless a caller says otherwise.
+    this.retryable = options.retryable ?? this.offline;
+  }
+}
+
+/**
+ * Statuses that describe the server's condition rather than the request's.
+ *
+ * 5xx is the gateway or the API being unavailable, 429 is deliberate
+ * backpressure, 408 is the server giving up on a slow upload — all of which a
+ * later attempt can resolve. Every other 4xx is a verdict on the request
+ * itself and will say exactly the same thing next time.
+ */
+function isTransientStatus(status: number): boolean {
+  return status >= 500 || status === 429 || status === 408;
+}
+
+/**
+ * Whether a failed call is worth repeating, for callers holding a change that
+ * would otherwise be lost. Duck-typed so non-ApiError rejections are handled.
+ */
+export function isRetryable(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { retryable?: unknown }).retryable === true;
+}
 
 let authToken: string | null = null;
 export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+/**
+ * A lossy connection is the case a plain `fetch` handles worst: it neither
+ * succeeds nor rejects, it just hangs — well past the OS's own TCP timeout on
+ * some networks. Without a cap, that reads as "the app is stuck" rather than
+ * "offline", and everything gated on this request (restore, sync, the outbox
+ * drain) sits frozen instead of falling back to the cached/queued state.
+ */
+const REQUEST_TIMEOUT_MS = 10000;
+
+/**
+ * /sync gets far longer, because it is the one call where a slow answer beats
+ * no answer.
+ *
+ * It carries every expense and 300 activity rows per group, and unlike /me it
+ * gates nothing: the app has already painted its cached view and is syncing
+ * behind it, so waiting costs the user nothing visible. Measured on a
+ * 700-expense account over a throttled 50kbps link the round trip took 6.2s —
+ * inside the old 10s cap, but not by much, and the payload grows with the
+ * ledger. Tripping that cap would not read as "this was slow", it would read
+ * as permanently offline, which is the exact complaint this work exists to
+ * fix.
+ *
+ * Receipt OCR gets the same treatment for the opposite reason: it *uploads*
+ * a photo, and a slow uplink is the common case.
+ */
+const SYNC_TIMEOUT_MS = 45000;
+const UPLOAD_TIMEOUT_MS = 60000;
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  timeoutMs: number = REQUEST_TIMEOUT_MS
+): Promise<T> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), timeoutMs);
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...options,
+      signal: timeout.signal,
       headers: {
         'Content-Type': 'application/json',
         // Lets the server skip pushing a change back to the device that made
@@ -110,19 +203,51 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     });
   } catch {
     // Distinguish "server unreachable" from "server said no" — the two need
-    // very different messages in the UI.
-    throw new ApiError('Cannot reach the server. Check your connection.');
+    // very different messages in the UI, and only the first is worth retrying.
+    // A timeout lands here too: on a bad connection it is exactly as
+    // retryable as a dropped connection, and the outbox treats them the same.
+    clearTimeout(timer);
+    throw new ApiError('Cannot reach the server. Check your connection.', { offline: true });
   }
 
-  const text = await response.text();
+  const status = response.status;
+
+  // The timer stays armed through the body read, which is the half that
+  // actually stalls: headers come back off the first packet, so clearing the
+  // timeout here left the download itself with no deadline at all. A response
+  // that hangs mid-body then hung the app outright — no error, no fallback to
+  // the cached view, just a screen that never finishes loading.
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    // Aborted by the timer, or the connection dropped mid-response. Either
+    // way nothing was read, so the call is as repeatable as one that never
+    // left the device.
+    throw new ApiError('The connection dropped before the reply finished.', {
+      offline: true,
+      status,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
   let body: any = {};
   try {
     body = text ? JSON.parse(text) : {};
   } catch {
-    throw new ApiError(`Unexpected response from server (${response.status})`);
+    // Not our API talking. A proxy or Funnel error page is HTML, and on a
+    // transient status it means the API was simply not reachable behind it.
+    throw new ApiError(`Unexpected response from server (${status})`, {
+      retryable: isTransientStatus(status),
+      status,
+    });
   }
   if (!response.ok || body.ok === false) {
-    throw new ApiError(body.error || `Request failed (${response.status})`);
+    throw new ApiError(body.error || `Request failed (${status})`, {
+      retryable: isTransientStatus(status),
+      status,
+    });
   }
   return body as T;
 }
@@ -224,7 +349,7 @@ export const api = {
       friendIds: string[];
       people: ApiUser[];
       syncedAt: string;
-    }>('/sync'),
+    }>('/sync', {}, SYNC_TIMEOUT_MS),
 
   /** Connect with someone by email. Mutual — they get you too. */
   addFriend: (email: string) =>
@@ -350,5 +475,9 @@ export const api = {
       total: number | null;
       items: ReceiptItem[];
       merchant: string | null;
-    }>('/ocr', { method: 'POST', body: JSON.stringify({ imageBase64, filename }) }),
+    }>(
+      '/ocr',
+      { method: 'POST', body: JSON.stringify({ imageBase64, filename }) },
+      UPLOAD_TIMEOUT_MS
+    ),
 };

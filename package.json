@@ -56,7 +56,7 @@
     "start:tunnel": "expo start --tunnel",
     "build:android": "eas build --platform android --profile preview",
     "build:ios": "eas build --platform ios --profile preview",
-    "web:build": "expo export --platform web --output-dir dist && node scripts/pwa-inject.mjs dist/index.html",
+    "web:build": "node scripts/retain-assets.mjs dist .web-build-attic stash && expo export --platform web --output-dir dist && node scripts/retain-assets.mjs dist .web-build-attic restore && node scripts/pwa-inject.mjs dist/index.html",
     "web:publish": "npm run web:build && systemctl --user restart splitwise-web"
   },
   "private": true

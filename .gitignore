@@ -54,3 +54,4 @@ ios/
 # The service-account key below IS a secret and stays ignored.
 *service-account*.json
 *-firebase-adminsdk-*.json
+.web-build-attic/

@@ -86,9 +86,19 @@ export const useAuth = create<AuthStore>((set, get) => ({
       set({ status: 'signedIn', user, offline: false, hasGoogle, hasPassword });
       void get().refresh();
     } catch (err) {
-      // A rejected token means the session really is gone; a network failure
-      // must not log the user out and wipe their view of the data.
-      if (err instanceof ApiError && /reach the server/i.test(err.message)) {
+      // Only an actual rejection of the token means the session is gone.
+      //
+      // Anything else — no connection, a timeout, or the 502 the proxy and
+      // Funnel return while the API restarts or the host is asleep — says
+      // nothing about whether the session is valid. Signing out on those was
+      // dropping people at the login screen with their local data cleared,
+      // mid-trip, purely because a request happened to fail; staying signed
+      // in and offline costs nothing, because the next successful call
+      // re-checks the token anyway.
+      // 401 specifically: this codebase's 403 means "you are not in that
+      // group", a verdict about a resource, never about the session.
+      const rejected = err instanceof ApiError && err.status === 401;
+      if (!rejected) {
         set({ status: 'signedIn', offline: true });
       } else {
         await removeStored(TOKEN);

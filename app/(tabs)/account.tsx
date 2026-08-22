@@ -15,7 +15,7 @@ import {
 import { usePersonalExpenses, useOverallBalance, useSharedGroups } from '../../src/store/selectors';
 import { useAuth } from '../../src/store/useAuth';
 import { useSettings, type ThemeMode } from '../../src/store/useSettings';
-import { getLastPushError } from '../../src/store/useStore';
+import { getLastPushError, syncOutbox, usePendingCount } from '../../src/store/useStore';
 import { useStore } from '../../src/store/useStore';
 import { font, spacing, useColors } from '../../src/theme';
 
@@ -37,6 +37,7 @@ export default function AccountScreen() {
   const themeMode = useSettings((s) => s.themeMode);
   const setThemeMode = useSettings((s) => s.setThemeMode);
   const pushError = getLastPushError();
+  const pending = usePendingCount();
   const overall = useOverallBalance();
   const me = people.find((p) => p.id === meId);
 
@@ -116,6 +117,9 @@ export default function AccountScreen() {
 
   const doSync = async () => {
     setSyncing(true);
+    // Push before pulling: a sync that quietly left this device's own unsent
+    // expenses behind is not the thing anyone means by "Sync now".
+    await syncOutbox();
     await refresh();
     setSyncing(false);
     // refresh() reports failure by setting `offline` rather than throwing, so
@@ -123,8 +127,15 @@ export default function AccountScreen() {
     setSyncedAt(useAuth.getState().offline ? '' : new Date().toLocaleTimeString());
   };
 
+  const waiting = `${pending} ${pending === 1 ? 'change' : 'changes'} waiting to sync`;
   const syncSubtitle = syncing
     ? 'Syncing…'
+    : pending > 0
+    ? // The backlog matters more than when the last pull happened: it is the
+      // only thing telling you work of yours is not on the server yet.
+      offline
+      ? `Offline — ${waiting}`
+      : waiting
     : offline
     ? 'Offline — showing the last copy'
     : syncedAt

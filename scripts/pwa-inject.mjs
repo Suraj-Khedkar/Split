@@ -7,8 +7,8 @@
  * output "single" and patching the one generated file afterwards is the
  * smaller, more predictable trade.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 const file = resolve(process.argv[2] ?? 'dist/index.html');
 let html = readFileSync(file, 'utf8');
@@ -114,3 +114,33 @@ html = html.replace('</head>', `${HEAD}  </head>`);
 
 writeFileSync(file, html);
 console.log('pwa-inject: manifest, apple meta tags and service worker added');
+
+/**
+ * Tell the service worker which bundle belongs to this build.
+ *
+ * It precaches that file during install, so the download happens while the
+ * previous worker is still serving the previous bundle rather than in front
+ * of a user staring at a blank screen. The name is only known here, after the
+ * export has produced its content hash.
+ */
+const dist = dirname(file);
+const swFile = join(dist, 'sw.js');
+const entry = (html.match(/\/_expo\/static\/js\/web\/entry-[^"']+\.js/) ?? [])[0];
+
+if (!entry) {
+  console.warn('pwa-inject: no entry bundle found in index.html — sw will not precache it');
+} else {
+  let sw = readFileSync(swFile, 'utf8');
+  if (!sw.includes('__ENTRY_BUNDLE__')) {
+    console.warn('pwa-inject: sw.js has no __ENTRY_BUNDLE__ placeholder');
+  } else {
+    // Cache name carries the build's hash, so a new build cannot reuse an old
+    // cache — which is what clears an entry poisoned by a previous bug.
+    const build = entry.replace(/^.*entry-/, '').replace(/\.js$/, '').slice(0, 12);
+    sw = sw
+      .replace('__ENTRY_BUNDLE__', entry)
+      .replace(/const CACHE = '[^']*'/, `const CACHE = 'split-and-track-v2-${build}'`);
+    writeFileSync(swFile, sw);
+    console.log(`pwa-inject: sw precaches ${entry} (cache split-and-track-v2-${build})`);
+  }
+}

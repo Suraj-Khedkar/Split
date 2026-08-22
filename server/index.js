@@ -7,6 +7,7 @@
  */
 import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { gzip } from 'node:zlib';
 
 import { WebSocketServer } from 'ws';
 
@@ -45,9 +46,14 @@ const PUSH_KEYS = vapidKeys(db);
 
 /* ------------------------------ helpers ------------------------------ */
 
+/**
+ * Below this, gzip's own header costs more than it saves.
+ */
+const MIN_GZIP_BYTES = 1024;
+
 function send(res, status, body) {
   const payload = JSON.stringify(body ?? {});
-  res.writeHead(status, {
+  const headers = {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     // The web app is served from a different Funnel port, so it is a
@@ -56,8 +62,39 @@ function send(res, status, body) {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    Vary: 'Accept-Encoding',
+  };
+
+  // /sync carries every expense and up to 300 activity rows per group, which
+  // for an active account is a few hundred KB of JSON — sent on every poll,
+  // every foreground and after every change. Uncompressed that is both the
+  // data bill and, on a weak connection, the reason a sync never finishes
+  // inside its timeout and the account looks permanently offline. JSON this
+  // repetitive gives up roughly 90% of itself to gzip.
+  //
+  // Note this is the API's own doing rather than the static server's: native
+  // clients reach it straight through Funnel and never pass through
+  // serve-web.mjs, so compressing there would miss them entirely.
+  const accepts = /\bgzip\b/.test(res.req?.headers['accept-encoding'] ?? '');
+  const raw = Buffer.from(payload);
+
+  if (!accepts || raw.length < MIN_GZIP_BYTES) {
+    res.writeHead(status, headers);
+    res.end(raw);
+    return;
+  }
+
+  // Async rather than gzipSync: this is a single process serving everyone, and
+  // a few hundred KB of synchronous compression stalls every other request.
+  gzip(raw, (err, zipped) => {
+    if (err) {
+      res.writeHead(status, headers);
+      res.end(raw);
+      return;
+    }
+    res.writeHead(status, { ...headers, 'Content-Encoding': 'gzip' });
+    res.end(zipped);
   });
-  res.end(payload);
 }
 
 const fail = (res, status, error) => send(res, status, { ok: false, error });
@@ -1777,11 +1814,56 @@ httpServer.on('upgrade', (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => {
     ws.userId = user.id;
     ws.deviceId = searchParams.get('device') ?? null;
+    ws.isAlive = true;
     clients.add(ws);
     ws.send(JSON.stringify({ type: 'ready' }));
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
+    ws.on('message', (raw) => {
+      // An in-band ping, answered in band.
+      //
+      // Browser JavaScript cannot see protocol-level pongs, so a client with
+      // no way to tell a live socket from a dead one has to ask a question it
+      // can actually hear the answer to. This matters most for an iOS PWA:
+      // when iOS suspends it the connection dies without ever firing onclose,
+      // and the socket goes on reporting OPEN forever after.
+      try {
+        if (JSON.parse(String(raw)).type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
+      } catch {
+        // Not JSON, or the socket went away mid-reply. Neither is worth
+        // dropping the connection over.
+      }
+    });
     ws.on('close', () => clients.delete(ws));
     ws.on('error', () => clients.delete(ws));
   });
+
+/**
+ * Drop sockets that stopped answering.
+ *
+ * Phones sleep and networks change without either side sending a FIN, so
+ * without this `clients` accumulates dead entries for the life of the process
+ * and every broadcast writes to sockets nobody is listening on.
+ */
+const HEARTBEAT_MS = 30000;
+const heartbeat = setInterval(() => {
+  for (const ws of clients) {
+    if (ws.isAlive === false) {
+      clients.delete(ws);
+      ws.terminate();
+      continue;
+    }
+    ws.isAlive = false;
+    try {
+      ws.ping();
+    } catch {
+      clients.delete(ws);
+    }
+  }
+}, HEARTBEAT_MS);
+// Must not hold the process open on its own.
+heartbeat.unref?.();
 });
 
 /**
