@@ -123,6 +123,28 @@ const server = createServer((req, res) => {
         : null
     : null;
 
+  /**
+   * Prefer a copy compressed at build time.
+   *
+   * scripts/precompress.mjs writes .br and .gz beside each text asset at
+   * maximum quality, which the on-the-fly path below cannot afford to do per
+   * request. If the file is absent — an older build, or a file the script
+   * skipped — this falls through to compressing it here, so nothing depends
+   * on the step having run.
+   */
+  if (encoding) {
+    const precompressed = `${file}.${encoding === 'br' ? 'br' : 'gz'}`;
+    if (existsSync(precompressed)) {
+      res.writeHead(200, {
+        ...headers,
+        'Content-Encoding': encoding,
+        'Content-Length': statSync(precompressed).size,
+      });
+      createReadStream(precompressed).pipe(res);
+      return;
+    }
+  }
+
   if (encoding) {
     headers['Content-Encoding'] = encoding;
     res.writeHead(200, headers);
